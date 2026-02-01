@@ -1,0 +1,36 @@
+# RustyClaw Configuration File
+# This is the default configuration for RustyClaw
+
+gateway:
+  host: "127.0.0.1"
+  port: 18789
+  log_level: "info"
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+
+  models:
+    primary: "qwen2.5:32b"
+    code: "deepseek-coder-v2:16b"
+    fast: "qwen2.5:7b"
+
+  keep_alive: "10m"
+
+channels:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []  # Empty array means all users are allowed
+
+sessions:
+  scope: "per-sender"  # Options: per-sender, main, per-peer, per-channel-peer
+  max_tokens: 128000
+
+storage:
+  storage_type: "sqlite"
+  path: "~/.rustyclaw/data.db"
+
+logging:
+  level: "info"  # Options: trace, debug, info, warn, error
+  format: "pretty"  # Options: pretty, compact, json

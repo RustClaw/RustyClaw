@@ -36,6 +36,24 @@ cargo clippy                  # Run linter
 cargo clippy -- -D warnings   # Lint with warnings as errors
 ```
 
+## Testing & Commit Policy
+
+**IMPORTANT: Always test before committing**
+
+Before creating any commit:
+1. Run `cargo fmt` to format code
+2. Run `cargo clippy` to check for issues
+3. Run `cargo build` to ensure compilation succeeds
+4. Run `cargo test` to verify all tests pass
+5. If adding new features, write tests first
+
+Example pre-commit workflow:
+```bash
+cargo fmt && cargo clippy && cargo build && cargo test
+```
+
+Only commit if all checks pass. This ensures main branch stability.
+
 ### Running
 ```bash
 cargo run                     # Run with default config
@@ -194,3 +212,24 @@ RustyClaw aims for configuration compatibility with OpenClaw:
 - Workspace structure (AGENTS.md, SOUL.md, TOOLS.md)
 
 When implementing features, refer to OpenClaw documentation for expected behavior.
+
+## CI/CD & Deployment
+
+### Proxmox Alpha Testing Server
+
+The project uses a self-hosted GitHub Actions runner on a Proxmox server for alpha testing and deployment.
+
+**CI/CD Pipeline:**
+- Triggered on push to `main` branch
+- Runs tests and builds release binary
+- Deploys to Proxmox server for alpha testing
+- Runner is hosted in the organization repository
+
+**Deployment Process:**
+1. Code pushed to GitHub
+2. Runner executes CI workflow
+3. Tests run on Proxmox server
+4. If passing, binary is deployed
+5. Service restarts automatically
+
+See `.github/workflows/ci.yml` for pipeline configuration.

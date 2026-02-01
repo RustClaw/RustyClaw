@@ -22,7 +22,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 
 # Database
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono"] }
 
 # Channel adapters (Phase 1: Telegram only)
 teloxide = { version = "0.12", features = ["macros"] }
@@ -35,13 +35,15 @@ async-openai = "0.20"
 
 # Utilities
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
 thiserror = "1.0"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 config = "0.14"
 directories = "5.0"
+dirs = "5.0"
+async-trait = "0.1"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

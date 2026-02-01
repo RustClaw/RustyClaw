@@ -1,0 +1,120 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test and Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run cargo build
+        run: cargo build --release
+
+      - name: Run cargo test
+        run: cargo test --release
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustyclaw-binary
+          path: target/release/rustyclaw
+
+  deploy-proxmox:
+    name: Deploy to Proxmox Alpha
+    needs: test
+    runs-on: self-hosted
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Create deployment directory
+        run: |
+          mkdir -p ~/rustyclaw-alpha
+          mkdir -p ~/rustyclaw-alpha/config
+
+      - name: Copy binary
+        run: |
+          cp target/release/rustyclaw ~/rustyclaw-alpha/
+          chmod +x ~/rustyclaw-alpha/rustyclaw
+
+      - name: Copy config if not exists
+        run: |
+          if [ ! -f ~/rustyclaw-alpha/config/config.yaml ]; then
+            cp config/default.yaml ~/rustyclaw-alpha/config/config.yaml
+            echo "Config file created. Please edit ~/rustyclaw-alpha/config/config.yaml"
+          fi
+
+      - name: Create systemd service
+        run: |
+          sudo tee /etc/systemd/system/rustyclaw-alpha.service > /dev/null <<EOF
+          [Unit]
+          Description=RustyClaw Alpha Testing Gateway
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=$USER
+          WorkingDirectory=$HOME/rustyclaw-alpha
+          ExecStart=$HOME/rustyclaw-alpha/rustyclaw --config $HOME/rustyclaw-alpha/config/config.yaml serve
+          Restart=on-failure
+          RestartSec=10
+          Environment="RUST_LOG=info"
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+      - name: Reload systemd and restart service
+        run: |
+          sudo systemctl daemon-reload
+          sudo systemctl enable rustyclaw-alpha
+          sudo systemctl restart rustyclaw-alpha
+
+      - name: Check service status
+        run: |
+          sleep 5
+          sudo systemctl status rustyclaw-alpha --no-pager || true
+          echo "Deployment complete!"
+          echo "View logs with: sudo journalctl -u rustyclaw-alpha -f"
