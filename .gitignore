@@ -1,0 +1,38 @@
+# Rust build artifacts
+/target
+Cargo.lock
+
+# RustyClaw runtime data
+.rustyclaw/
+*.db
+*.db-shm
+*.db-wal
+
+# Architecture/planning docs (keep local only)
+rustyclaw.md
+
+# Development tools
+.claude/
+
+# Environment secrets
+secrets.env
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/

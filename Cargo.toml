@@ -1,0 +1,51 @@
+[package]
+name = "rustyclaw"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustyClaw Contributors"]
+description = "A local-first, privacy-focused AI assistant gateway written in Rust"
+license = "MIT"
+repository = "https://github.com/your-org/rustyclaw"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Web framework
+axum = "0.7"
+tower = "0.4"
+tower-http = "0.5"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Database
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
+
+# Channel adapters (Phase 1: Telegram only)
+teloxide = { version = "0.12", features = ["macros"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# LLM client (OpenAI-compatible)
+async-openai = "0.20"
+
+# Utilities
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+thiserror = "1.0"
+chrono = "0.4"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+config = "0.14"
+directories = "5.0"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.0"
+mockito = "1.0"
