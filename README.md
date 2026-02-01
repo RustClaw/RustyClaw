@@ -157,3 +157,4 @@ MIT License - See [LICENSE](LICENSE) for details
 
 - Inspired by [OpenClaw](https://openclaw.ai)
 - Built with [Tokio](https://tokio.rs), [Teloxide](https://github.com/teloxide/teloxide), and [SQLx](https://github.com/launchbadge/sqlx)
+
