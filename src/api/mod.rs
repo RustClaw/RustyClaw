@@ -2,6 +2,7 @@ pub mod auth;
 pub mod error;
 pub mod response;
 pub mod routes;
+pub mod websocket;
 
 use crate::core::Router;
 use crate::storage::Storage;
@@ -59,6 +60,10 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
         // Public endpoints (no auth required)
         let public_routes = AxumRouter::new()
             .route("/health", get(health_handler))
+            .route(
+                &self.ws_path,
+                axum::routing::get(websocket::websocket_handler),
+            )
             .with_state(self.router.clone());
 
         // Protected endpoints (auth required)
