@@ -54,11 +54,7 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
     }
 
     /// Handle incoming WhatsApp message
-    pub async fn handle_message(
-        &self,
-        from: String,
-        message_text: String,
-    ) -> Result<String> {
+    pub async fn handle_message(&self, from: String, message_text: String) -> Result<String> {
         if !self.config.enabled {
             return Ok("WhatsApp adapter is disabled".to_string());
         }
@@ -66,11 +62,7 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
         tracing::debug!("WhatsApp message from {}: {}", from, message_text);
 
         // Extract user ID from WhatsApp address (format: 1234567890@s.whatsapp.net)
-        let user_id = from
-            .split('@')
-            .next()
-            .unwrap_or(&from)
-            .to_string();
+        let user_id = from.split('@').next().unwrap_or(&from).to_string();
 
         // Route through the main gateway
         let response = self
@@ -187,7 +179,11 @@ mod tests {
                 .cloned())
         }
 
-        async fn get_messages(&self, session_id: &str, limit: Option<usize>) -> Result<Vec<Message>> {
+        async fn get_messages(
+            &self,
+            session_id: &str,
+            limit: Option<usize>,
+        ) -> Result<Vec<Message>> {
             let messages = self.messages.lock().unwrap();
             let mut session_messages: Vec<Message> = messages
                 .iter()
