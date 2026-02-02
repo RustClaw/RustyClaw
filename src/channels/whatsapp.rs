@@ -127,6 +127,7 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
+    #[allow(dead_code)]
     #[derive(Clone)]
     struct MockStorage {
         sessions: Arc<Mutex<Vec<Session>>>,
