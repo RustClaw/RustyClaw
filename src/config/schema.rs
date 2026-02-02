@@ -114,8 +114,10 @@ pub struct TelegramConfig {
 pub struct WhatsAppChannelConfig {
     #[serde(default)]
     pub enabled: bool,
-    pub phone_number: Option<String>,
-    pub api_key: Option<String>,
+    #[serde(default)]
+    pub phone_number: String,
+    #[serde(default)]
+    pub local_gateway_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
