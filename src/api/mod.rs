@@ -107,13 +107,11 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             ));
 
         // Combine routes
-        let app = AxumRouter::new()
+        AxumRouter::new()
             .merge(public_routes)
             .merge(api_routes)
             .layer(DefaultBodyLimit::max(1024 * 1024 * 10)) // 10MB
-            .layer(axum::middleware::from_fn(logging_middleware));
-
-        app
+            .layer(axum::middleware::from_fn(logging_middleware))
     }
 
     /// Start the Web API server
