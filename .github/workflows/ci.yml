@@ -61,11 +61,18 @@ jobs:
     runs-on: self-hosted
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     env:
-      DEPLOY_HOST: 192.168.15.18
+      DEPLOY_HOST: 192.168.15.9
       DEPLOY_USER: root
       DEPLOY_PATH: /opt/rustyclaw-alpha
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -75,25 +82,25 @@ jobs:
 
       - name: Create deployment directory on CT210
         run: |
-          ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_PATH}/config"
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_PATH}/config"
 
       - name: Copy binary to CT210
         run: |
-          scp target/release/rustyclaw ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
-          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "chmod +x ${DEPLOY_PATH}/rustyclaw"
+          scp -i ~/.ssh/deploy_key target/release/rustyclaw ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "chmod +x ${DEPLOY_PATH}/rustyclaw"
 
       - name: Copy config if not exists
         run: |
-          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "
             if [ ! -f ${DEPLOY_PATH}/config/config.yaml ]; then
               echo 'Config file not found, creating from default'
             fi
           "
-          scp config/default.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/config.yaml.example || true
+          scp -i ~/.ssh/deploy_key config/default.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/config.yaml.example || true
 
       - name: Create systemd service on CT210
         run: |
-          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cat > /etc/systemd/system/rustyclaw-alpha.service <<EOF
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "cat > /etc/systemd/system/rustyclaw-alpha.service <<EOF
           [Unit]
           Description=RustyClaw Alpha Testing Gateway
           After=network.target
@@ -113,7 +120,7 @@ jobs:
 
       - name: Reload systemd and restart service on CT210
         run: |
-          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "
             systemctl daemon-reload
             systemctl enable rustyclaw-alpha
             systemctl restart rustyclaw-alpha
@@ -122,6 +129,6 @@ jobs:
       - name: Check service status on CT210
         run: |
           sleep 5
-          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "systemctl status rustyclaw-alpha --no-pager || true"
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "systemctl status rustyclaw-alpha --no-pager || true"
           echo "Deployment to CT210 complete!"
-          echo "View logs with: ssh ${DEPLOY_USER}@${DEPLOY_HOST} journalctl -u rustyclaw-alpha -f"
+          echo "View logs with: ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} journalctl -u rustyclaw-alpha -f"
