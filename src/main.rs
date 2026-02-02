@@ -17,7 +17,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Start the RustyClaw gateway server
     Serve,
+
+    /// Manage channel connections (WhatsApp, Discord, etc.)
+    #[command(subcommand)]
+    Channels(ChannelsCommands),
+}
+
+#[derive(Subcommand)]
+enum ChannelsCommands {
+    /// Connect a channel (e.g., `rustyclaw channels connect whatsapp`)
+    Connect {
+        /// Channel to connect (whatsapp, discord, etc.)
+        #[arg(value_name = "CHANNEL")]
+        channel: String,
+    },
 }
 
 #[tokio::main]
@@ -52,6 +67,9 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Serve) | None => {
             rustyclaw::run(config).await?;
+        }
+        Some(Commands::Channels(ChannelsCommands::Connect { channel })) => {
+            rustyclaw::channels::connect(&channel, config).await?;
         }
     }
 
