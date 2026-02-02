@@ -29,6 +29,14 @@ fn substitute_env_vars(mut config: Config) -> Result<Config> {
         }
     }
 
+    // Substitute Discord token
+    if let Some(token) = &config.channels.discord.token {
+        if token.starts_with("${") && token.ends_with("}") {
+            let var_name = &token[2..token.len() - 1];
+            config.channels.discord.token = std::env::var(var_name).ok();
+        }
+    }
+
     Ok(config)
 }
 
@@ -41,6 +49,11 @@ fn validate_config(config: &Config) -> Result<()> {
     // Validate Telegram config
     if config.channels.telegram.enabled && config.channels.telegram.token.is_none() {
         anyhow::bail!("Telegram is enabled but no token provided");
+    }
+
+    // Validate Discord config
+    if config.channels.discord.enabled && config.channels.discord.token.is_none() {
+        anyhow::bail!("Discord is enabled but no token provided");
     }
 
     // Validate session scope

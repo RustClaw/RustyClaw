@@ -38,6 +38,15 @@ pub async fn run(config: Config) -> Result<()> {
         handles.push(telegram_handle);
     }
 
+    if config.channels.discord.enabled {
+        tracing::info!("Starting Discord adapter...");
+        let discord_handle = tokio::spawn(channels::discord::run(
+            config.channels.discord.clone(),
+            router.clone(),
+        ));
+        handles.push(discord_handle);
+    }
+
     // Wait for all adapters
     tracing::info!("RustyClaw gateway running");
     for handle in handles {

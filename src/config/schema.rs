@@ -98,6 +98,8 @@ pub struct ChannelsConfig {
     #[serde(default)]
     pub telegram: TelegramConfig,
     #[serde(default)]
+    pub discord: DiscordConfig,
+    #[serde(default)]
     pub whatsapp: WhatsAppChannelConfig,
 }
 
@@ -108,6 +110,17 @@ pub struct TelegramConfig {
     pub token: Option<String>,
     #[serde(default)]
     pub allowed_users: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiscordConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub token: Option<String>,
+    #[serde(default)]
+    pub allowed_users: Vec<u64>,
+    #[serde(default)]
+    pub allowed_guilds: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

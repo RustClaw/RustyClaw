@@ -23,6 +23,12 @@ channels:
     token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: []  # Empty array means all users are allowed
 
+  discord:
+    enabled: false
+    token: "${DISCORD_BOT_TOKEN}"
+    allowed_users: []      # Empty = all users allowed
+    allowed_guilds: []     # Empty = all guilds allowed
+
 sessions:
   scope: "per-sender"  # Options: per-sender, main, per-peer, per-channel-peer
   max_tokens: 128000
