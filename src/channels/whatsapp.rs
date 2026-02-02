@@ -122,27 +122,15 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, SessionsConfig};
-    use crate::llm::Client as LlmClient;
     use crate::storage::{Message, Session, Storage};
     use anyhow::Result;
     use async_trait::async_trait;
-    use chrono::Utc;
     use std::sync::Mutex;
 
     #[derive(Clone)]
     struct MockStorage {
         sessions: Arc<Mutex<Vec<Session>>>,
         messages: Arc<Mutex<Vec<Message>>>,
-    }
-
-    impl MockStorage {
-        fn new() -> Self {
-            Self {
-                sessions: Arc::new(Mutex::new(Vec::new())),
-                messages: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
     }
 
     #[async_trait]
