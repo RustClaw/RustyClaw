@@ -76,4 +76,23 @@ impl<S: Storage> Router<S> {
 
         self.session_manager.get_session_stats(&session.id).await
     }
+
+    /// Get or create session (exposed for web API)
+    pub async fn get_or_create_session_api(
+        &self,
+        user_id: &str,
+        channel: &str,
+    ) -> Result<crate::core::Session> {
+        self.session_manager
+            .get_or_create_session(user_id, channel)
+            .await
+    }
+
+    /// Get session messages (exposed for web API)
+    pub async fn get_session_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::storage::Message>> {
+        self.session_manager.get_messages(session_id).await
+    }
 }

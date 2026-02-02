@@ -1,13 +1,14 @@
 pub mod auth;
 pub mod error;
 pub mod response;
+pub mod routes;
 
 use crate::core::Router;
 use crate::storage::Storage;
 use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router as AxumRouter};
 use std::sync::Arc;
 use tracing::info;
@@ -62,23 +63,42 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
 
         // Protected endpoints (auth required)
         let api_routes = AxumRouter::new()
-            // Session endpoints (will be implemented in Stage 2)
+            // Session endpoints
             .route(
                 &format!("{}/sessions", self.api_path),
-                post(|| async {
-                    Err::<Json<ApiResponse<()>>, ApiError>(ApiError::InternalError(
-                        "Not implemented".to_string(),
-                    ))
-                }),
+                post(routes::create_session),
             )
-            // Models endpoint
+            .route(
+                &format!("{}/sessions", self.api_path),
+                get(routes::list_sessions),
+            )
+            .route(
+                &format!("{}/sessions/:id", self.api_path),
+                get(routes::get_session),
+            )
+            .route(
+                &format!("{}/sessions/:id", self.api_path),
+                delete(routes::delete_session),
+            )
+            // Chat endpoint
+            .route(&format!("{}/chat", self.api_path), post(routes::chat))
+            // Message endpoints
+            .route(
+                &format!("{}/messages", self.api_path),
+                get(routes::list_messages),
+            )
+            .route(
+                &format!("{}/messages/:id", self.api_path),
+                get(routes::get_message),
+            )
+            // Models endpoints
             .route(
                 &format!("{}/models", self.api_path),
-                get(|| async {
-                    Err::<Json<ApiResponse<ModelsResponse>>, ApiError>(ApiError::InternalError(
-                        "Not implemented".to_string(),
-                    ))
-                }),
+                get(routes::list_models),
+            )
+            .route(
+                &format!("{}/models/:name/load", self.api_path),
+                post(routes::load_model),
             )
             .with_state(self.router.clone())
             .layer(axum::middleware::from_fn_with_state(
