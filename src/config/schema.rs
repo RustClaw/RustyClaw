@@ -97,6 +97,8 @@ pub struct RoutingRule {
 pub struct ChannelsConfig {
     #[serde(default)]
     pub telegram: TelegramConfig,
+    #[serde(default)]
+    pub whatsapp: WhatsAppChannelConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -106,6 +108,14 @@ pub struct TelegramConfig {
     pub token: Option<String>,
     #[serde(default)]
     pub allowed_users: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WhatsAppChannelConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub phone_number: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

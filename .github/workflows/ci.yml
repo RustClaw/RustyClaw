@@ -56,10 +56,14 @@ jobs:
           path: target/release/rustyclaw
 
   deploy-proxmox:
-    name: Deploy to Proxmox Alpha
+    name: Deploy to Proxmox CT210
     needs: test
     runs-on: self-hosted
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      DEPLOY_HOST: 192.168.15.18
+      DEPLOY_USER: root
+      DEPLOY_PATH: /opt/rustyclaw-alpha
     steps:
       - uses: actions/checkout@v4
 
@@ -69,60 +73,55 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Create deployment directory
+      - name: Create deployment directory on CT210
         run: |
-          mkdir -p ~/rustyclaw-alpha
-          mkdir -p ~/rustyclaw-alpha/config
+          ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_PATH}/config"
 
-      - name: Copy binary
+      - name: Copy binary to CT210
         run: |
-          cp target/release/rustyclaw ~/rustyclaw-alpha/
-          chmod +x ~/rustyclaw-alpha/rustyclaw
+          scp target/release/rustyclaw ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
+          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "chmod +x ${DEPLOY_PATH}/rustyclaw"
 
       - name: Copy config if not exists
         run: |
-          if [ ! -f ~/rustyclaw-alpha/config/config.yaml ]; then
-            cp config/default.yaml ~/rustyclaw-alpha/config/config.yaml
-            echo "Config file created. Please edit ~/rustyclaw-alpha/config/config.yaml"
-          fi
+          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
+            if [ ! -f ${DEPLOY_PATH}/config/config.yaml ]; then
+              echo 'Config file not found, creating from default'
+            fi
+          "
+          scp config/default.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/config.yaml.example || true
 
-      - name: Run database migrations
+      - name: Create systemd service on CT210
         run: |
-          export DATABASE_URL="sqlite:$HOME/rustyclaw-alpha/.rustyclaw/data.db"
-          mkdir -p $HOME/rustyclaw-alpha/.rustyclaw
-          # Migrations will run automatically on first start, or manually:
-          # sqlx migrate run --database-url $DATABASE_URL
-
-      - name: Create systemd service
-        run: |
-          sudo tee /etc/systemd/system/rustyclaw-alpha.service > /dev/null <<EOF
+          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cat > /etc/systemd/system/rustyclaw-alpha.service <<EOF
           [Unit]
           Description=RustyClaw Alpha Testing Gateway
           After=network.target
 
           [Service]
           Type=simple
-          User=$USER
-          WorkingDirectory=$HOME/rustyclaw-alpha
-          ExecStart=$HOME/rustyclaw-alpha/rustyclaw --config $HOME/rustyclaw-alpha/config/config.yaml serve
+          User=root
+          WorkingDirectory=${DEPLOY_PATH}
+          ExecStart=${DEPLOY_PATH}/rustyclaw --config ${DEPLOY_PATH}/config/config.yaml serve
           Restart=on-failure
           RestartSec=10
-          Environment="RUST_LOG=info"
-          Environment="HOME=$HOME"
+          Environment=\"RUST_LOG=info\"
 
           [Install]
           WantedBy=multi-user.target
-          EOF
+          EOF"
 
-      - name: Reload systemd and restart service
+      - name: Reload systemd and restart service on CT210
         run: |
-          sudo systemctl daemon-reload
-          sudo systemctl enable rustyclaw-alpha
-          sudo systemctl restart rustyclaw-alpha
+          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "
+            systemctl daemon-reload
+            systemctl enable rustyclaw-alpha
+            systemctl restart rustyclaw-alpha
+          "
 
-      - name: Check service status
+      - name: Check service status on CT210
         run: |
           sleep 5
-          sudo systemctl status rustyclaw-alpha --no-pager || true
-          echo "Deployment complete!"
-          echo "View logs with: sudo journalctl -u rustyclaw-alpha -f"
+          ssh ${DEPLOY_USER}@${DEPLOY_HOST} "systemctl status rustyclaw-alpha --no-pager || true"
+          echo "Deployment to CT210 complete!"
+          echo "View logs with: ssh ${DEPLOY_USER}@${DEPLOY_HOST} journalctl -u rustyclaw-alpha -f"
