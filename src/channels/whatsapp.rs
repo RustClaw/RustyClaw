@@ -330,6 +330,7 @@ mod tests {
     }
 
     impl MockStorage {
+        #[allow(dead_code)]
         fn new() -> Self {
             Self {
                 sessions: Arc::new(Mutex::new(Vec::new())),
