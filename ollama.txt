@@ -1,0 +1,78 @@
+# RustyClaw LLM VM Credentials
+
+## VM Information
+- **VM ID:** 300
+- **VM Name:** LLM
+- **IP Address:** 192.168.15.14
+- **Hostname:** LLM
+
+## Login Credentials
+- **Username:** ollama
+- **Password:** OllamaGPU2024!
+
+## SSH Access
+```bash
+ssh ollama@192.168.15.14
+```
+
+## GPU Configuration
+- **GPU 1:** NVIDIA GeForce RTX 3060 (PCI 03:00.0)
+- **GPU 2:** NVIDIA GeForce RTX 3060 (PCI 04:00.0)
+
+## Ollama API
+- **Endpoint:** http://192.168.15.14:11434
+- **API Version:** v1 (OpenAI-compatible)
+
+## RustyClaw Configuration
+Update the RustyClaw config to point to this LLM VM:
+
+```yaml
+llm:
+  provider: "ollama"
+  base_url: "http://192.168.15.14:11434/v1"
+
+  models:
+    primary: "qwen2.5:32b"
+    code: "deepseek-coder-v2:16b"
+    fast: "qwen2.5:7b"
+```
+
+## Useful Commands
+```bash
+# Check GPU status
+nvidia-smi
+
+# Check Ollama status
+systemctl status ollama
+
+# View Ollama logs
+journalctl -u ollama -f
+
+# List available models
+ollama list
+
+# Pull a model
+ollama pull qwen2.5:32b
+
+# Test Ollama API
+curl http://192.168.15.14:11434/api/tags
+```
+
+## Proxmox VM Management
+```bash
+# SSH to Proxmox
+ssh root@192.168.15.18
+
+# VM commands
+qm status 300          # Check VM status
+qm start 300           # Start VM
+qm stop 300            # Stop VM
+qm shutdown 300        # Graceful shutdown
+qm reboot 300          # Reboot VM
+```
+
+## Notes
+- GPUs are passed through using rombar=0 to avoid conflicts with identical cards
+- Both RTX 3060 GPUs are available for inference
+- NVIDIA Driver 580 is installed with CUDA support
+- Ollama is configured to listen on all interfaces (0.0.0.0:11434)

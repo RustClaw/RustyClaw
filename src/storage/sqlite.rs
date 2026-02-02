@@ -110,7 +110,7 @@ impl Storage for SqliteStorage {
         let limit_val = limit.unwrap_or(100);
 
         let rows = sqlx::query(
-            "SELECT id, session_id, role, content, created_at FROM messages
+            "SELECT id, session_id, role, content, created_at, model_used, tokens FROM messages
              WHERE session_id = ?
              ORDER BY created_at DESC
              LIMIT ?",
@@ -122,12 +122,17 @@ impl Storage for SqliteStorage {
 
         let mut messages: Vec<Message> = rows
             .into_iter()
-            .map(|r| Message {
-                id: r.get("id"),
-                session_id: r.get("session_id"),
-                role: r.get("role"),
-                content: r.get("content"),
-                created_at: r.get("created_at"),
+            .map(|r| {
+                let tokens_i64: Option<i64> = r.get("tokens");
+                Message {
+                    id: r.get("id"),
+                    session_id: r.get("session_id"),
+                    role: r.get("role"),
+                    content: r.get("content"),
+                    created_at: r.get("created_at"),
+                    model_used: r.get("model_used"),
+                    tokens: tokens_i64.map(|t| t as usize),
+                }
             })
             .collect();
 
@@ -137,13 +142,16 @@ impl Storage for SqliteStorage {
 
     async fn add_message(&self, message: Message) -> Result<()> {
         sqlx::query(
-            "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO messages (id, session_id, role, content, created_at, model_used, tokens)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&message.id)
         .bind(&message.session_id)
         .bind(&message.role)
         .bind(&message.content)
         .bind(message.created_at)
+        .bind(&message.model_used)
+        .bind(message.tokens.map(|t| t as i64))
         .execute(&self.pool)
         .await?;
 

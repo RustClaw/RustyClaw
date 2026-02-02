@@ -1,0 +1,50 @@
+# RustyClaw Configuration - Ollama VM Setup
+# Connects to the LLM VM at 192.168.15.14
+
+gateway:
+  host: "127.0.0.1"
+  port: 18789
+  log_level: "info"
+
+llm:
+  provider: "ollama"
+  base_url: "http://192.168.15.14:11434/v1"
+
+  models:
+    primary: "qwen2.5:32b"
+    code: "deepseek-coder-v2:16b"
+    fast: "qwen2.5:7b"
+
+  # Hot-swap cache configuration  cache:
+    type: "ram"          # ram = ~1-2 sec swap, ssd = ~20-30 sec swap, none = always reload
+    max_models: 3        # Maximum models to keep in cache
+    eviction: "lru"      # Least recently used eviction
+
+  # Model routing rules
+  routing:
+    default: "qwen2.5:32b"
+    rules:
+      # Code-related tasks → deepseek-coder
+      - pattern: "(code|function|implement|debug|class|def |fn |refactor|bug)"
+        model: "deepseek-coder-v2:16b"
+
+      # Short queries → fast model      - pattern: "^.{0,100}$"
+        model: "qwen2.5:7b"
+
+channels:
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []
+
+sessions:
+  scope: "per-sender"
+  max_tokens: 128000
+
+storage:
+  storage_type: "sqlite"
+  path: "~/.rustyclaw/data.db"
+
+logging:
+  level: "info"
+  format: "pretty"

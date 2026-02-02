@@ -118,7 +118,7 @@ async fn handle_message<S: Storage>(
 
     match router.handle_message(&user_id, channel, text).await {
         Ok(response) => {
-            bot.send_message(msg.chat.id, response).await?;
+            bot.send_message(msg.chat.id, response.content).await?;
         }
         Err(e) => {
             tracing::error!("Error handling message: {}", e);

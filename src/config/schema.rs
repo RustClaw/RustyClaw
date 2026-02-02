@@ -44,6 +44,10 @@ pub struct LlmConfig {
     pub models: LlmModels,
     #[serde(default)]
     pub keep_alive: Option<String>,
+    #[serde(default)]
+    pub cache: CacheConfig,
+    #[serde(default)]
+    pub routing: Option<RoutingConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +57,40 @@ pub struct LlmModels {
     pub code: Option<String>,
     #[serde(default)]
     pub fast: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    #[serde(default = "default_cache_type", rename = "type")]
+    pub cache_type: String,
+    #[serde(default = "default_max_models")]
+    pub max_models: usize,
+    #[serde(default = "default_eviction")]
+    pub eviction: String,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            cache_type: default_cache_type(),
+            max_models: default_max_models(),
+            eviction: default_eviction(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingConfig {
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub rules: Vec<RoutingRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingRule {
+    pub pattern: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -167,4 +205,16 @@ fn default_storage_path() -> String {
 
 fn default_log_format() -> String {
     "pretty".to_string()
+}
+
+fn default_cache_type() -> String {
+    "ram".to_string()
+}
+
+fn default_max_models() -> usize {
+    3
+}
+
+fn default_eviction() -> String {
+    "lru".to_string()
 }

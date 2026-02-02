@@ -2,4 +2,4 @@ mod router;
 mod session;
 
 pub use router::Router;
-pub use session::{Session, SessionManager};
+pub use session::{MessageResponse, Session, SessionManager, SessionStats};

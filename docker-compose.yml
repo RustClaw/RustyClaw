@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  rustyclaw:
+    build: .
+    container_name: rustyclaw
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+
+    # Volume mounts for persistent data
+    volumes:
+      # Configuration and SQLite database
+      - ./data:/root/.rustyclaw
+
+      # Docker socket for sandbox execution
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    environment:
+      # Bot tokens (use .env file)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+
+      # LLM endpoint (connects to Ollama service or external VM)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+
+    depends_on:
+      - ollama
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama LLM service (optional - can use external VM instead)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+
+    volumes:
+      # Persistent model storage
+      - ollama_models:/root/.ollama
+
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  ollama_models:
+    driver: local

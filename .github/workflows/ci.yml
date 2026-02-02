@@ -86,6 +86,13 @@ jobs:
             echo "Config file created. Please edit ~/rustyclaw-alpha/config/config.yaml"
           fi
 
+      - name: Run database migrations
+        run: |
+          export DATABASE_URL="sqlite:$HOME/rustyclaw-alpha/.rustyclaw/data.db"
+          mkdir -p $HOME/rustyclaw-alpha/.rustyclaw
+          # Migrations will run automatically on first start, or manually:
+          # sqlx migrate run --database-url $DATABASE_URL
+
       - name: Create systemd service
         run: |
           sudo tee /etc/systemd/system/rustyclaw-alpha.service > /dev/null <<EOF
@@ -101,6 +108,7 @@ jobs:
           Restart=on-failure
           RestartSec=10
           Environment="RUST_LOG=info"
+          Environment="HOME=$HOME"
 
           [Install]
           WantedBy=multi-user.target

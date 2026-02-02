@@ -22,6 +22,10 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_used: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<usize>,
 }
 
 #[async_trait]
