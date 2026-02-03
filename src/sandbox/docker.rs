@@ -26,6 +26,8 @@ pub struct ContainerConfig {
     pub workspace_mode: crate::sandbox::security::WorkspaceMode,
     pub workspace_path: String,
     pub network_enabled: bool,
+    #[allow(dead_code)]
+    pub setup_command: Option<String>,
     pub env_vars: Vec<(String, String)>,
     pub labels: HashMap<String, String>,
 }

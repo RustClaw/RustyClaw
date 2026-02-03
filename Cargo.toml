@@ -65,6 +65,9 @@ once_cell = "1.19"
 # Docker client
 bollard = "0.16"
 
+# Email support
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1-rustls", "ring", "webpki-roots"] }
+
 [dev-dependencies]
 tempfile = "3.0"
 mockito = "1.0"

@@ -2,6 +2,7 @@ use crate::sandbox::security::WorkspaceMode;
 use anyhow::{Context, Result};
 
 /// Workspace path information
+#[allow(dead_code)]
 pub struct WorkspacePaths {
     pub host_path: String,
     pub container_path: String,
@@ -9,17 +10,20 @@ pub struct WorkspacePaths {
 }
 
 /// Manages workspace mounting and isolation
+#[allow(dead_code)]
 pub struct WorkspaceManager {
     workspace_mode: WorkspaceMode,
 }
 
 impl WorkspaceManager {
     /// Create a new workspace manager
+    #[allow(dead_code)]
     pub fn new(workspace_mode: WorkspaceMode) -> Self {
         Self { workspace_mode }
     }
 
     /// Prepare workspace paths for a container
+    #[allow(dead_code)]
     pub fn prepare_workspace(&self, scope_id: &str) -> Result<WorkspacePaths> {
         match self.workspace_mode {
             WorkspaceMode::None => {
@@ -60,6 +64,7 @@ impl WorkspaceManager {
     }
 
     /// Get the isolated workspace path for a session
+    #[allow(dead_code)]
     fn get_isolated_workspace(&self, scope_id: &str) -> Result<String> {
         let home = dirs::home_dir().context("Could not determine home directory")?;
         Ok(home
@@ -71,6 +76,7 @@ impl WorkspaceManager {
     }
 
     /// Get the agent workspace path
+    #[allow(dead_code)]
     fn get_agent_workspace(&self) -> Result<String> {
         let home = dirs::home_dir().context("Could not determine home directory")?;
         Ok(home

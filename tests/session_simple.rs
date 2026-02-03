@@ -113,7 +113,6 @@ async fn test_session_with_memory_storage() {
     let sessions_config = SessionsConfig {
         scope: "per-sender".to_string(),
         max_tokens: 128000,
-        channel_routing: "isolated".to_string(),
     };
 
     let session_manager = SessionManager::new(storage, sessions_config, llm_client);

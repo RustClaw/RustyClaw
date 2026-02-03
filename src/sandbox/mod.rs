@@ -2,6 +2,7 @@ mod container;
 mod docker;
 mod pruning;
 mod security;
+mod workspace;
 
 pub use container::{ContainerMetadata, ContainerScope};
 pub use docker::ExecResult;

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -50,6 +50,10 @@ pub struct ToolResult {
     pub success: bool,
 }
 
+/// Tool executor function type
+pub type ToolExecutor =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<ToolResult>> + Send>> + Send + Sync>;
+
 /// Tool definition - what the LLM sees
 #[derive(Clone)]
 pub struct Tool {
@@ -63,9 +67,7 @@ pub struct Tool {
     pub parameters: Value,
 
     /// Tool executor function
-    pub execute: Arc<
-        dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<ToolResult>> + Send>> + Send + Sync,
-    >,
+    pub execute: ToolExecutor,
 }
 
 /// Type alias for tool factories (context-aware tool creators)
@@ -89,15 +91,18 @@ pub trait RustyclawPlugin: Send + Sync {
 
     /// Called when plugin is registered
     /// Plugins register tools and hooks here
-    fn register(&self, api: &dyn PluginApi) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    fn register(
+        &self,
+        api: &dyn PluginApi,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 
     /// Called when plugin loads (after registration)
-    fn on_load(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn on_load(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async { Ok(()) })
     }
 
     /// Called when plugin unloads
-    fn on_unload(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn on_unload(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -248,7 +253,10 @@ pub struct HookModification {
 
 /// Plugin hook function
 pub type PluginHook = Arc<
-    dyn Fn(HookType, ToolContext) -> Pin<Box<dyn Future<Output = Result<Option<HookModification>>> + Send>>
+    dyn Fn(
+            HookType,
+            ToolContext,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<HookModification>>> + Send>>
         + Send
         + Sync,
 >;
@@ -268,6 +276,7 @@ pub struct PluginManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_hook_type_display() {

@@ -1,7 +1,4 @@
-use crate::plugins::traits::{
-    AfterToolCallEvent, BeforeAgentStartEvent, BeforeToolCallEvent, HookModification, HookType,
-    MessageReceivedEvent, MessageSendingEvent, PluginHook, ToolContext,
-};
+use crate::plugins::traits::{HookModification, HookType, PluginHook, ToolContext};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,7 +44,7 @@ impl HookRunner {
         });
 
         // Sort by priority (higher first)
-        entries.sort_by(|a, b| b.priority.cmp(&a.priority));
+        entries.sort_by_key(|h| std::cmp::Reverse(h.priority));
 
         debug!(
             "Registered hook: {} for {:?}",
@@ -60,11 +57,7 @@ impl HookRunner {
 
     /// Execute all hooks of a type (void hooks - parallel execution)
     #[instrument(skip(self, ctx), fields(hook_type = ?hook_type))]
-    pub async fn run_void_hooks(
-        &self,
-        hook_type: HookType,
-        ctx: ToolContext,
-    ) -> Result<()> {
+    pub async fn run_void_hooks(&self, hook_type: HookType, ctx: ToolContext) -> Result<()> {
         let hooks = self.hooks.read().await;
 
         if let Some(entries) = hooks.get(&hook_type) {
@@ -163,7 +156,8 @@ impl HookRunner {
 
     /// Run message_sending hooks
     pub async fn run_message_sending(&self, ctx: ToolContext) -> Result<Option<HookModification>> {
-        self.run_modifying_hooks(HookType::MessageSending, ctx).await
+        self.run_modifying_hooks(HookType::MessageSending, ctx)
+            .await
     }
 
     /// Run message_sent hooks
@@ -173,7 +167,8 @@ impl HookRunner {
 
     /// Run before_tool_call hooks
     pub async fn run_before_tool_call(&self, ctx: ToolContext) -> Result<Option<HookModification>> {
-        self.run_modifying_hooks(HookType::BeforeToolCall, ctx).await
+        self.run_modifying_hooks(HookType::BeforeToolCall, ctx)
+            .await
     }
 
     /// Run after_tool_call hooks
@@ -182,8 +177,12 @@ impl HookRunner {
     }
 
     /// Run tool_result_persist hooks
-    pub async fn run_tool_result_persist(&self, ctx: ToolContext) -> Result<Option<HookModification>> {
-        self.run_modifying_hooks(HookType::ToolResultPersist, ctx).await
+    pub async fn run_tool_result_persist(
+        &self,
+        ctx: ToolContext,
+    ) -> Result<Option<HookModification>> {
+        self.run_modifying_hooks(HookType::ToolResultPersist, ctx)
+            .await
     }
 
     /// Run session_start hooks
@@ -288,7 +287,12 @@ mod tests {
             });
 
             runner
-                .register_hook(HookType::BeforeAgentStart, format!("hook_{}", order), *priority, hook)
+                .register_hook(
+                    HookType::BeforeAgentStart,
+                    format!("hook_{}", order),
+                    *priority,
+                    hook,
+                )
                 .await
                 .unwrap();
         }

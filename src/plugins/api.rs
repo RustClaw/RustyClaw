@@ -62,6 +62,7 @@ impl PluginApi for DefaultPluginApi {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

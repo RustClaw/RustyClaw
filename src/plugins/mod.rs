@@ -10,15 +10,19 @@ pub mod api;
 /// Tool and plugin registries
 pub mod registry;
 
+/// Example plugins demonstrating the plugin system
+pub mod examples;
+
 // Re-export core types
 pub use traits::{
-    HookType, HookModification, PluginApi, PluginHook, PluginManifest, RustyclawPlugin,
-    Tool, ToolContext, ToolFactory, ToolParameter, ToolResult, BeforeAgentStartEvent,
-    BeforeToolCallEvent, AfterToolCallEvent, MessageReceivedEvent, MessageSendingEvent,
+    AfterToolCallEvent, BeforeAgentStartEvent, BeforeToolCallEvent, HookModification, HookType,
+    MessageReceivedEvent, MessageSendingEvent, PluginApi, PluginHook, PluginManifest,
+    RustyclawPlugin, Tool, ToolContext, ToolFactory, ToolParameter, ToolResult,
 };
 
-pub use hooks::HookRunner;
 pub use api::DefaultPluginApi;
+pub use examples::EmailPlugin;
+pub use hooks::HookRunner;
 pub use registry::{PluginRegistry, ToolRegistry};
 
 use anyhow::Result;
@@ -31,7 +35,9 @@ static PLUGIN_REGISTRY: once_cell::sync::OnceCell<Arc<PluginRegistry>> =
 
 /// Initialize the global plugin registry
 pub fn init_plugin_registry() -> Arc<PluginRegistry> {
-    PLUGIN_REGISTRY.get_or_init(|| Arc::new(PluginRegistry::new())).clone()
+    PLUGIN_REGISTRY
+        .get_or_init(|| Arc::new(PluginRegistry::new()))
+        .clone()
 }
 
 /// Get the global plugin registry
@@ -79,10 +85,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_plugin_registry_init() {
-        let registry = init_plugin_registry();
-        assert_eq!(
-            get_plugin_registry().unwrap().plugin_count().await,
-            0
-        );
+        let _ = init_plugin_registry();
+        assert_eq!(get_plugin_registry().unwrap().plugin_count().await, 0);
     }
 }

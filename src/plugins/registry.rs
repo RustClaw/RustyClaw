@@ -1,5 +1,5 @@
 use crate::plugins::traits::{Tool, ToolContext, ToolFactory};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
@@ -75,7 +75,11 @@ impl ToolRegistry {
         // Factory-generated tools would be created here
         // (requires async context which isn't available during registration)
 
-        debug!("Retrieved {} tools for session {}", tools.len(), ctx.session_id);
+        debug!(
+            "Retrieved {} tools for session {}",
+            tools.len(),
+            ctx.session_id
+        );
         Ok(tools)
     }
 
@@ -176,12 +180,7 @@ impl PluginRegistry {
     }
 
     /// Register a plugin
-    pub async fn register_plugin(
-        &self,
-        id: String,
-        name: String,
-        version: String,
-    ) -> Result<()> {
+    pub async fn register_plugin(&self, id: String, name: String, version: String) -> Result<()> {
         let mut plugins = self
             .plugins
             .lock()
@@ -227,10 +226,10 @@ impl PluginRegistry {
             .plugins
             .lock()
             .map_err(|e| anyhow!("Failed to acquire plugin registry lock: {}", e))?;
-        Ok(plugins
+        plugins
             .get(id)
             .map(|p| p.enabled)
-            .ok_or_else(|| anyhow!("Plugin '{}' not found", id))?)
+            .ok_or_else(|| anyhow!("Plugin '{}' not found", id))
     }
 
     /// Enable plugin
@@ -356,7 +355,11 @@ mod tests {
     async fn test_register_plugin() {
         let registry = PluginRegistry::new();
         registry
-            .register_plugin("test-plugin".to_string(), "Test".to_string(), "1.0.0".to_string())
+            .register_plugin(
+                "test-plugin".to_string(),
+                "Test".to_string(),
+                "1.0.0".to_string(),
+            )
             .await
             .unwrap();
 
@@ -368,7 +371,11 @@ mod tests {
     async fn test_plugin_enable_disable() {
         let registry = PluginRegistry::new();
         registry
-            .register_plugin("test-plugin".to_string(), "Test".to_string(), "1.0.0".to_string())
+            .register_plugin(
+                "test-plugin".to_string(),
+                "Test".to_string(),
+                "1.0.0".to_string(),
+            )
             .await
             .unwrap();
 
