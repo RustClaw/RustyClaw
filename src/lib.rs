@@ -134,6 +134,21 @@ pub async fn run(config: Config) -> Result<()> {
     TOOL_POLICY_ENGINE.set(Arc::new(policy_engine)).ok();
     tracing::info!("✅ Tool policy engine initialized");
 
+    // Initialize and start skill watcher if enabled
+    if config.tools.skills_enabled {
+        let skills_dir = config.tools.skills_dir.clone();
+        tokio::spawn(async move {
+            let watcher = tools::skill_watcher::SkillWatcher::new(&skills_dir);
+            if let Err(e) = watcher.run().await {
+                tracing::error!("Skill watcher error: {}", e);
+            }
+        });
+        tracing::info!(
+            "✅ Skill watcher started (dir: {})",
+            config.tools.skills_dir
+        );
+    }
+
     // Initialize storage
     let storage = storage::sqlite::SqliteStorage::new(&config.storage.path).await?;
     tracing::info!("Storage initialized");

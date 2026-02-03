@@ -71,7 +71,24 @@ pub async fn execute_tool_with_context(
                 .context("Failed to parse list_whatsapp_accounts parameters")?;
             whatsapp::list_whatsapp_accounts(_params).await
         }
-        _ => Err(anyhow!("Unknown tool: {}", name)),
+        _ => {
+            // Try to find in skills registry
+            if super::skills::get_skill(name).await.is_some() {
+                return super::skills::execute_skill(name, arguments).await;
+            }
+
+            // Try to find in plugin registry
+            if let Some(registry) = crate::plugins::get_plugin_registry() {
+                if let Ok(Some(tool)) = registry.tools.get_tool(name) {
+                    return (tool.execute)(arguments.to_string())
+                        .await
+                        .map(|result| result.content);
+                }
+            }
+
+            // If not found anywhere, return unknown tool error
+            Err(anyhow!("Unknown tool: {}", name))
+        }
     }
 }
 

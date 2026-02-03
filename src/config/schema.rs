@@ -352,6 +352,12 @@ pub struct ToolsConfig {
     /// Tool access policies: tool_name -> access_level (allow, deny, elevated)
     #[serde(default)]
     pub policies: HashMap<String, String>,
+    /// Directory to watch for skill files (default: ~/.rustyclaw/skills)
+    #[serde(default = "default_skills_dir")]
+    pub skills_dir: String,
+    /// Enable the skill watcher (default: true)
+    #[serde(default = "default_skills_enabled")]
+    pub skills_enabled: bool,
 }
 
 impl Default for ToolsConfig {
@@ -370,6 +376,23 @@ impl Default for ToolsConfig {
                 ("write_file".to_string(), "elevated".to_string()),
                 ("list_files".to_string(), "elevated".to_string()),
             ]),
+            skills_dir: default_skills_dir(),
+            skills_enabled: default_skills_enabled(),
         }
     }
+}
+
+fn default_skills_dir() -> String {
+    dirs::home_dir()
+        .map(|h: std::path::PathBuf| {
+            h.join(".rustyclaw")
+                .join("skills")
+                .to_string_lossy()
+                .to_string()
+        })
+        .unwrap_or_else(|| "./.rustyclaw/skills".to_string())
+}
+
+fn default_skills_enabled() -> bool {
+    true
 }

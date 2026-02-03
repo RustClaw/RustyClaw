@@ -263,12 +263,54 @@ impl<S: Storage> SessionManager<S> {
 
     /// Get available tools for this session
     fn get_available_tools(&self) -> Vec<ToolDefinition> {
-        // For now, always enable WhatsApp tools if service is available
-        if crate::get_whatsapp_service().is_some() {
-            crate::tools::whatsapp::get_whatsapp_tool_definitions()
-        } else {
-            Vec::new()
+        let mut tools = Vec::new();
+
+        // Helper function to extract tool definition from JSON
+        let extract_tool = |def: &serde_json::Value| -> Option<ToolDefinition> {
+            let func = def.get("function")?;
+            let name = func.get("name")?.as_str()?;
+            let description = func.get("description")?.as_str()?;
+            let parameters = func.get("parameters")?;
+            Some(ToolDefinition {
+                name: name.to_string(),
+                description: description.to_string(),
+                parameters: parameters.clone(),
+            })
+        };
+
+        // 1. Add exec tools (always available)
+        let exec_defs = crate::tools::get_exec_tool_definitions();
+        for def in exec_defs {
+            if let Some(tool) = extract_tool(&def) {
+                tools.push(tool);
+            }
         }
+
+        // 2. Add WhatsApp tools if service is available
+        if crate::get_whatsapp_service().is_some() {
+            let whatsapp_defs = crate::tools::whatsapp::get_whatsapp_tool_definitions();
+            tools.extend(whatsapp_defs);
+        }
+
+        // 3. Add plugin tools from PluginRegistry if available
+        if let Some(registry) = crate::plugins::get_plugin_registry() {
+            if let Ok(tool_names) = registry.tools.list_tools() {
+                for tool_name in tool_names {
+                    if let Ok(Some(tool)) = registry.tools.get_tool(&tool_name) {
+                        tools.push(ToolDefinition {
+                            name: tool.name,
+                            description: tool.description,
+                            parameters: tool.parameters,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 4. Add skill tools from SKILL_BODIES if available
+        tools.extend(get_skill_tool_definitions());
+
+        tools
     }
 
     /// Add a message to a session
@@ -327,6 +369,32 @@ impl<S: Storage> SessionManager<S> {
             total_tokens,
             models_used,
         })
+    }
+}
+
+/// Helper function to convert skill entries to tool definitions
+fn get_skill_tool_definitions() -> Vec<ToolDefinition> {
+    // Skills are loaded asynchronously, so we use a blocking approach with tokio runtime
+    use tokio::runtime::Handle;
+
+    if let Ok(handle) = Handle::try_current() {
+        let skills_future = async {
+            crate::tools::skills::list_skills()
+                .await
+                .into_iter()
+                .map(|entry| ToolDefinition {
+                    name: entry.manifest.name,
+                    description: entry.manifest.description,
+                    parameters: entry.manifest.parameters,
+                })
+                .collect()
+        };
+
+        // Try to block on the future if we're in an async context
+        handle.block_on(skills_future)
+    } else {
+        // Not in async context, return empty for now
+        Vec::new()
     }
 }
 
