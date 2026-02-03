@@ -29,13 +29,12 @@ pub async fn execute_tool_with_context(
 
     match name {
         "exec" => {
-            let params: super::exec::ExecParams = serde_json::from_str(arguments)
-                .context("Failed to parse exec parameters")?;
+            let params: super::exec::ExecParams =
+                serde_json::from_str(arguments).context("Failed to parse exec parameters")?;
 
             if let Some(session_id) = session_id {
                 if let Some(sandbox) = crate::get_sandbox_manager() {
-                    super::exec::exec_command(&sandbox, session_id, is_main_session, params)
-                        .await
+                    super::exec::exec_command(&sandbox, session_id, is_main_session, params).await
                 } else {
                     Err(anyhow!("Sandbox manager not initialized"))
                 }
@@ -44,13 +43,12 @@ pub async fn execute_tool_with_context(
             }
         }
         "bash" => {
-            let params: super::exec::BashParams = serde_json::from_str(arguments)
-                .context("Failed to parse bash parameters")?;
+            let params: super::exec::BashParams =
+                serde_json::from_str(arguments).context("Failed to parse bash parameters")?;
 
             if let Some(session_id) = session_id {
                 if let Some(sandbox) = crate::get_sandbox_manager() {
-                    super::exec::exec_bash(&sandbox, session_id, is_main_session, params)
-                        .await
+                    super::exec::exec_bash(&sandbox, session_id, is_main_session, params).await
                 } else {
                     Err(anyhow!("Sandbox manager not initialized"))
                 }

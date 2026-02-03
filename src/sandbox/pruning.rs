@@ -67,9 +67,7 @@ impl PruningService {
 
     /// Start the pruning service (runs in background)
     pub async fn start(&self) {
-        let mut interval = interval(Duration::from_secs(
-            self.config.check_interval_minutes * 60,
-        ));
+        let mut interval = interval(Duration::from_secs(self.config.check_interval_minutes * 60));
 
         loop {
             interval.tick().await;
@@ -105,11 +103,7 @@ impl PruningService {
                 );
 
                 if let Err(e) = self.manager.remove_container(&container.scope_id).await {
-                    tracing::warn!(
-                        "Failed to prune container {}: {}",
-                        container.scope_id,
-                        e
-                    );
+                    tracing::warn!("Failed to prune container {}: {}", container.scope_id, e);
                 } else {
                     pruned_count += 1;
                 }

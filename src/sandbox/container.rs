@@ -60,11 +60,6 @@ impl ContainerManager {
         })
     }
 
-    /// Get the Docker client
-    pub fn get_docker(&self) -> Arc<DockerClient> {
-        self.docker.clone()
-    }
-
     /// Get or create a container for the given scope
     pub async fn get_or_create_container(&self, scope_id: &str) -> Result<String> {
         // Check cache first
@@ -136,21 +131,14 @@ impl ContainerManager {
             workspace_mode: self.config.workspace.clone(),
             workspace_path,
             network_enabled: self.config.network,
-            setup_command: self.config.setup_command.clone(),
             env_vars: vec![],
             labels: HashMap::from([
                 (
                     "rustyclaw.scope".to_string(),
                     format!("{:?}", self.config.scope),
                 ),
-                (
-                    "rustyclaw.scope_id".to_string(),
-                    scope_id.to_string(),
-                ),
-                (
-                    "rustyclaw.created_at".to_string(),
-                    Utc::now().to_rfc3339(),
-                ),
+                ("rustyclaw.scope_id".to_string(), scope_id.to_string()),
+                ("rustyclaw.created_at".to_string(), Utc::now().to_rfc3339()),
             ]),
         };
 

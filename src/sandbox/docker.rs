@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use bollard::container::{CreateContainerOptions, Config};
+use bollard::container::{Config, CreateContainerOptions};
 use bollard::exec::CreateExecOptions;
 use bollard::image::CreateImageOptions;
 use bollard::Docker;
+use futures::stream::StreamExt;
 use std::collections::HashMap;
 use tracing::{debug, info};
-use futures::stream::StreamExt;
 
 /// Docker client wrapper with RustyClaw-specific helpers
 pub struct DockerClient {
@@ -26,7 +26,6 @@ pub struct ContainerConfig {
     pub workspace_mode: crate::sandbox::security::WorkspaceMode,
     pub workspace_path: String,
     pub network_enabled: bool,
-    pub setup_command: Option<String>,
     pub env_vars: Vec<(String, String)>,
     pub labels: HashMap<String, String>,
 }
@@ -34,8 +33,8 @@ pub struct ContainerConfig {
 impl DockerClient {
     /// Create a new Docker client
     pub async fn new() -> Result<Self> {
-        let client = Docker::connect_with_local_defaults()
-            .context("Failed to connect to Docker daemon")?;
+        let client =
+            Docker::connect_with_local_defaults().context("Failed to connect to Docker daemon")?;
 
         debug!("Connected to Docker daemon");
         Ok(Self { client })
@@ -56,10 +55,12 @@ impl DockerClient {
             ..Default::default()
         };
 
-        let mut stream = self.client.create_image(Some(create_image_options), None, None);
+        let mut stream = self
+            .client
+            .create_image(Some(create_image_options), None, None);
 
         // Consume the stream to ensure the image is pulled
-        while let Some(_) = stream.next().await {
+        while stream.next().await.is_some() {
             // Just consume the stream
         }
 
@@ -84,7 +85,8 @@ impl DockerClient {
             .collect();
 
         // Add default environment
-        env_vars.push("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string());
+        env_vars
+            .push("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string());
 
         // Prepare bind mounts for workspace
         let mut binds = vec![];
@@ -144,11 +146,7 @@ impl DockerClient {
     }
 
     /// Execute a command in a container and capture output
-    pub async fn exec_command(
-        &self,
-        container_id: &str,
-        command: &[&str],
-    ) -> Result<ExecResult> {
+    pub async fn exec_command(&self, container_id: &str, command: &[&str]) -> Result<ExecResult> {
         // Create exec instance
         let exec_options = CreateExecOptions {
             cmd: Some(command.to_vec()),
@@ -175,7 +173,11 @@ impl DockerClient {
         let mut stdout = String::new();
         let mut stderr = String::new();
 
-        if let StartExecResults::Attached { mut output, input: _ } = output {
+        if let StartExecResults::Attached {
+            mut output,
+            input: _,
+        } = output
+        {
             use futures::stream::StreamExt;
             while let Some(Ok(msg)) = output.next().await {
                 match msg {
@@ -197,7 +199,7 @@ impl DockerClient {
             .await
             .context("Failed to inspect exec")?;
 
-        let exit_code = inspect_result.exit_code.unwrap_or(-1) as i64;
+        let exit_code = inspect_result.exit_code.unwrap_or(-1);
 
         debug!(
             "Command executed in container: exit_code={}, stdout_len={}, stderr_len={}",
@@ -235,7 +237,9 @@ impl DockerClient {
         let mut result = vec![];
 
         for container in containers {
-            if let (Some(id), Some(name)) = (container.id, container.names.and_then(|mut n| n.pop())) {
+            if let (Some(id), Some(name)) =
+                (container.id, container.names.and_then(|mut n| n.pop()))
+            {
                 let name = name.trim_start_matches('/').to_string();
                 result.push(ContainerInfo { id, name });
             }
@@ -246,14 +250,15 @@ impl DockerClient {
 
     /// Check if a container exists and is running
     pub async fn container_exists(&self, container_id: &str) -> Result<bool> {
-        let options = bollard::container::InspectContainerOptions {
-            size: false,
-        };
-        match self.client.inspect_container(container_id, Some(options)).await {
+        let options = bollard::container::InspectContainerOptions { size: false };
+        match self
+            .client
+            .inspect_container(container_id, Some(options))
+            .await
+        {
             Ok(_) => Ok(true),
             Err(bollard::errors::Error::DockerResponseServerError {
-                status_code: 404,
-                ..
+                status_code: 404, ..
             }) => Ok(false),
             Err(e) => Err(anyhow::anyhow!("Failed to inspect container: {}", e)),
         }

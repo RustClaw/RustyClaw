@@ -1,13 +1,12 @@
-mod docker;
 mod container;
-mod security;
-mod workspace;
+mod docker;
 mod pruning;
+mod security;
 
-pub use security::{SandboxMode, WorkspaceMode};
-pub use docker::ExecResult;
 pub use container::{ContainerMetadata, ContainerScope};
+pub use docker::ExecResult;
 pub use pruning::PruningConfig;
+pub use security::{SandboxMode, WorkspaceMode};
 
 use crate::config::SandboxConfig;
 use anyhow::{Context, Result};
@@ -44,9 +43,9 @@ impl SandboxManager {
                 service_clone.start().await;
             });
 
-            info!("Sandbox pruning service started (idle_hours={}, max_age_days={})",
-                config.pruning.idle_hours,
-                config.pruning.max_age_days
+            info!(
+                "Sandbox pruning service started (idle_hours={}, max_age_days={})",
+                config.pruning.idle_hours, config.pruning.max_age_days
             );
 
             Some(service)
