@@ -6,8 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
-use uuid::Uuid;
 use wacore::types::events::Event;
+use wacore_binary::jid::Jid;
 use waproto::whatsapp as wa;
 use whatsapp_rust::bot::{Bot, MessageContext};
 use whatsapp_rust::store::SqliteStore;
@@ -41,34 +41,58 @@ impl WhatsAppService {
         // Format phone number as JID (e.g., "1234567890@s.whatsapp.net")
         let jid_str = format!("{}@s.whatsapp.net", phone);
 
-        // Parse JID using the whatsapp-rust library's parser
-        // Note: Implementation depends on the exact API of whatsapp-rust
-        // For now, we'll use a placeholder that returns a generated ID
-        // TODO: Complete implementation once whatsapp-rust API is finalized
+        // Parse JID
+        let jid = jid_str
+            .parse::<Jid>()
+            .context("Invalid phone number format - must be numeric")?;
 
-        let message_id = Uuid::new_v4().to_string();
+        // Create message
+        let msg = wa::Message {
+            conversation: Some(message.to_string()),
+            ..Default::default()
+        };
 
-        info!(
-            "Preparing to send WhatsApp message to contact {}: {}",
-            jid_str, message
-        );
+        // Send message using the Client API
+        let message_id = self
+            .client
+            .send_message(jid.clone(), msg)
+            .await
+            .context("Failed to send WhatsApp message to contact")?;
 
-        // The actual send would be:
-        // let jid = jid_str.parse()?;
-        // let msg = wa::Message { conversation: Some(message.to_string()), ..Default::default() };
-        // let message_id = self.client.send_message(jid, msg).await?;
+        info!("✓ Sent WhatsApp message to {}: ID={}", jid_str, message_id);
 
         Ok(message_id)
     }
 
     /// Send message to a group by ID or name
     pub async fn send_to_group(&self, group_identifier: &str, message: &str) -> Result<String> {
-        // TODO: Complete implementation once whatsapp-rust API is finalized
-        let message_id = Uuid::new_v4().to_string();
+        // Try to parse as JID first, otherwise look up by name
+        let jid = if group_identifier.contains('@') {
+            // Direct JID provided
+            group_identifier
+                .parse::<Jid>()
+                .context("Invalid group JID format")?
+        } else {
+            // Look up group by name
+            self.find_group_by_name(group_identifier).await?
+        };
+
+        // Create message
+        let msg = wa::Message {
+            conversation: Some(message.to_string()),
+            ..Default::default()
+        };
+
+        // Send message
+        let message_id = self
+            .client
+            .send_message(jid.clone(), msg)
+            .await
+            .context("Failed to send WhatsApp message to group")?;
 
         info!(
-            "Preparing to send WhatsApp message to group {}: {}",
-            group_identifier, message
+            "✓ Sent WhatsApp message to group {}: ID={}",
+            jid, message_id
         );
 
         Ok(message_id)
@@ -76,17 +100,64 @@ impl WhatsAppService {
 
     /// List all groups
     pub async fn list_groups(&self) -> Result<Vec<GroupInfo>> {
-        // TODO: Complete implementation once whatsapp-rust API is finalized
-        // For now, return empty list
-        info!("Fetching WhatsApp groups");
-        Ok(Vec::new())
+        let groups = self
+            .client
+            .groups()
+            .get_participating()
+            .await
+            .context("Failed to fetch participating groups")?;
+
+        let group_list: Vec<GroupInfo> = groups
+            .into_values()
+            .map(|metadata| GroupInfo {
+                id: metadata.id.to_string(),
+                name: metadata.subject.clone(),
+                participant_count: metadata.participants.len(),
+            })
+            .collect();
+
+        info!("✓ Fetched {} WhatsApp groups", group_list.len());
+        Ok(group_list)
     }
 
     /// Verify if a phone number is on WhatsApp
     pub async fn verify_contact(&self, phone: &str) -> Result<Option<String>> {
-        // TODO: Complete implementation once whatsapp-rust API is finalized
-        info!("Verifying contact: {}", phone);
-        Ok(None)
+        let results = self
+            .client
+            .contacts()
+            .is_on_whatsapp(&[phone])
+            .await
+            .context("Failed to verify contact")?;
+
+        match results.first() {
+            Some(result) if result.is_registered => {
+                info!("✓ Contact {} is registered on WhatsApp", phone);
+                Ok(Some(result.jid.to_string()))
+            }
+            _ => {
+                info!("Contact {} is not on WhatsApp", phone);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Find group JID by name (case-insensitive)
+    async fn find_group_by_name(&self, name: &str) -> Result<Jid> {
+        let groups = self
+            .client
+            .groups()
+            .get_participating()
+            .await
+            .context("Failed to fetch groups for lookup")?;
+
+        for (_, metadata) in groups {
+            if metadata.subject.to_lowercase() == name.to_lowercase() {
+                info!("✓ Found group '{}' with JID {}", name, metadata.id);
+                return Ok(metadata.id);
+            }
+        }
+
+        anyhow::bail!("Group '{}' not found in participating groups", name)
     }
 }
 

@@ -31,6 +31,7 @@ whatsapp-rust = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "
 whatsapp-rust-tokio-transport = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
 whatsapp-rust-ureq-http-client = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
 wacore = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
+wacore-binary = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
 waproto = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
 
 # HTTP client
