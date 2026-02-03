@@ -39,6 +39,7 @@ async fn test_ollama_connection() {
         }],
         max_tokens: Some(50),
         temperature: None,
+        tools: None,
     };
 
     let response = client.chat(request).await.expect("Failed to get response");
@@ -90,6 +91,7 @@ async fn test_model_routing() {
         }],
         max_tokens: Some(100),
         temperature: None,
+        tools: None,
     };
 
     let response = client.chat(request).await.expect("Failed to get response");
@@ -135,6 +137,7 @@ async fn test_hot_swapping() {
         }],
         max_tokens: Some(20),
         temperature: None,
+        tools: None,
     };
     let response1 = client.chat(request1).await.expect("Failed to get response");
     let time1 = start.elapsed();
@@ -151,6 +154,7 @@ async fn test_hot_swapping() {
         }],
         max_tokens: Some(20),
         temperature: None,
+        tools: None,
     };
     let response2 = client.chat(request2).await.expect("Failed to get response");
     let time2 = start.elapsed();
@@ -167,6 +171,7 @@ async fn test_hot_swapping() {
         }],
         max_tokens: Some(20),
         temperature: None,
+        tools: None,
     };
     let response3 = client.chat(request3).await.expect("Failed to get response");
     let time3 = start.elapsed();
