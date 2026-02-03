@@ -51,6 +51,7 @@ async fn test_session_conversation_flow() {
     let sessions_config = SessionsConfig {
         scope: "per-sender".to_string(),
         max_tokens: 128000,
+        channel_routing: "isolated".to_string(),
     };
 
     let session_manager = SessionManager::new(storage.clone(), sessions_config, llm_client);
@@ -189,9 +190,12 @@ async fn test_router_conversation() {
         sessions: SessionsConfig {
             scope: "per-sender".to_string(),
             max_tokens: 128000,
+            channel_routing: "isolated".to_string(),
         },
         storage: Default::default(),
         logging: Default::default(),
+        sandbox: Default::default(),
+        tools: Default::default(),
     };
 
     let router = Router::new(config, storage, llm_client);
