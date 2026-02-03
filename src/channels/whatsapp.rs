@@ -167,6 +167,7 @@ pub struct WhatsAppAdapter<S: Storage> {
     #[allow(dead_code)]
     router: Arc<Router<S>>,
     config: WhatsAppConfig,
+    account_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -174,6 +175,16 @@ pub struct WhatsAppConfig {
     pub enabled: bool,
     #[serde(default)]
     pub phone_number: String,
+    /// Enable self-chat mode (only respond to messages from yourself)
+    #[serde(default = "default_self_chat_mode")]
+    pub self_chat_mode: bool,
+    /// Account ID for multi-account support (defaults to phone number)
+    #[serde(default)]
+    pub account_id: Option<String>,
+}
+
+fn default_self_chat_mode() -> bool {
+    true
 }
 
 impl<S: Storage + 'static> WhatsAppAdapter<S> {
@@ -234,21 +245,40 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
         Ok(WhatsAppConfig {
             enabled: channel_config.enabled,
             phone_number: channel_config.phone_number,
+            self_chat_mode: channel_config.self_chat_mode,
+            account_id: channel_config.account_id,
         })
     }
 
     pub fn new(router: Arc<Router<S>>, config: WhatsAppConfig) -> Result<Self> {
         if !config.enabled {
             info!("WhatsApp adapter disabled in configuration");
-            return Ok(Self { router, config });
+            let account_id = config
+                .account_id
+                .clone()
+                .unwrap_or_else(|| config.phone_number.clone());
+            return Ok(Self {
+                router,
+                config,
+                account_id,
+            });
         }
+
+        let account_id = config
+            .account_id
+            .clone()
+            .unwrap_or_else(|| config.phone_number.clone());
 
         // Ensure credentials directory exists with proper permissions
         Self::ensure_creds_dir()?;
 
-        info!("WhatsApp adapter initialized");
+        info!("WhatsApp adapter initialized for account: {}", account_id);
 
-        Ok(Self { router, config })
+        Ok(Self {
+            router,
+            config,
+            account_id,
+        })
     }
 
     /// CLI entry point for WhatsApp connection (no dependencies on Router)
@@ -355,8 +385,10 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
         // Set up HTTP client for media operations
         let http_client = UreqHttpClient::new();
 
-        // Clone router for event handler
+        // Clone router and config for event handler (needed for 'static closure)
         let router = self.router.clone();
+        let config = self.config.clone();
+        let account_id = self.account_id.clone();
 
         // Build the bot with event handler
         let mut bot = Bot::builder()
@@ -365,11 +397,18 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
             .with_http_client(http_client)
             .on_event(move |event, _client| {
                 let router = router.clone();
+                let config = config.clone();
+                let account_id = account_id.clone();
                 async move {
                     match event {
                         Event::Message(message, info) => {
                             // Extract sender JID and get message text
-                            let sender = info.source.sender.to_string();
+                            let sender_jid = info.source.sender.to_string();
+
+                            // Extract sender phone number (strip @s.whatsapp.net)
+                            let sender_phone = sender_jid
+                                .strip_suffix("@s.whatsapp.net")
+                                .unwrap_or(&sender_jid);
 
                             // Get text content from the message
                             if let Some(text) = message.conversation.clone() {
@@ -377,7 +416,29 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
                                     return;
                                 }
 
-                                info!("WhatsApp message from {}: {}", sender, text);
+                                // SELF-CHAT MODE FILTER
+                                if config.self_chat_mode {
+                                    // Only process messages from yourself
+                                    if sender_phone != config.phone_number {
+                                        tracing::debug!(
+                                            "Self-chat mode: ignoring message from {} (not self)",
+                                            sender_jid
+                                        );
+                                        return;
+                                    }
+
+                                    info!("✅ Self-chat message received from {}", sender_jid);
+                                } else {
+                                    info!("WhatsApp message from {}: {}", sender_jid, text);
+                                }
+
+                                // Create user_id for session
+                                // Format: whatsapp:<account_id>:<sender_phone>
+                                let user_id = format!(
+                                    "whatsapp:{}:{}",
+                                    account_id,
+                                    sender_phone
+                                );
 
                                 // Create message context for sending reply
                                 let ctx = MessageContext {
@@ -387,7 +448,7 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
                                 };
 
                                 // Process message through router
-                                match router.handle_message(&sender, "whatsapp", &text).await {
+                                match router.handle_message(&user_id, "whatsapp", &text).await {
                                     Ok(response) => {
                                         // Create response message
                                         let reply = wa::Message {
@@ -399,10 +460,10 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
                                         if let Err(e) = ctx.send_message(reply).await {
                                             error!(
                                                 "Failed to send WhatsApp response to {}: {}",
-                                                sender, e
+                                                sender_jid, e
                                             );
                                         } else {
-                                            info!("✓ Sent response to {}", sender);
+                                            info!("✓ Sent response to {}", sender_jid);
                                         }
                                     }
                                     Err(e) => {
@@ -424,7 +485,37 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
                             }
                         }
                         Event::Connected(_) => {
-                            info!("✅ WhatsApp bot connected successfully!");
+                            info!("✅ WhatsApp account '{}' connected successfully!", account_id);
+
+                            // Send welcome message to self in self-chat mode
+                            if config.self_chat_mode {
+                                let jid_str = format!("{}@s.whatsapp.net", config.phone_number);
+                                match jid_str.parse::<Jid>() {
+                                    Ok(self_jid) => {
+                                        let welcome = wa::Message {
+                                            conversation: Some(format!(
+                                                "🤖 RustyClaw connected (account: {})!\n\n\
+                                                You can now send me messages here to interact with the LLM.\n\n\
+                                                This is SELF-CHAT MODE - only messages you send to yourself are processed.\n\n\
+                                                Try:\n\
+                                                • Ask questions: 'What is Rust?'\n\
+                                                • Send messages: 'Send WhatsApp to John: Meeting at 3pm'\n\
+                                                • List groups: 'What WhatsApp groups do I have?'\n\
+                                                • List accounts: 'What WhatsApp accounts are connected?'",
+                                                account_id
+                                            )),
+                                            ..Default::default()
+                                        };
+
+                                        if let Err(e) = _client.send_message(self_jid, welcome).await {
+                                            error!("Failed to send welcome message: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Invalid phone number format for welcome message: {}", e);
+                                    }
+                                }
+                            }
                         }
                         Event::LoggedOut(_) => {
                             error!("❌ WhatsApp bot was logged out!");
@@ -441,7 +532,9 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
 
         // Create and register WhatsApp service for outbound messaging
         let service = Arc::new(WhatsAppService::new(bot.client().clone()));
-        crate::set_whatsapp_service(service);
+
+        // Register service for this account
+        crate::register_whatsapp_service(self.account_id.clone(), service);
 
         info!("WhatsApp bot running and listening for messages");
         info!(
@@ -564,10 +657,14 @@ mod tests {
         let config = WhatsAppConfig {
             enabled: true,
             phone_number: "1234567890".to_string(),
+            self_chat_mode: true,
+            account_id: Some("personal".to_string()),
         };
 
         assert!(config.enabled);
         assert_eq!(config.phone_number, "1234567890");
+        assert!(config.self_chat_mode);
+        assert_eq!(config.account_id, Some("personal".to_string()));
     }
 
     #[test]
@@ -575,6 +672,8 @@ mod tests {
         let config = WhatsAppConfig {
             enabled: false,
             phone_number: "1234567890".to_string(),
+            self_chat_mode: true,
+            account_id: None,
         };
 
         assert!(!config.enabled);
@@ -585,6 +684,8 @@ mod tests {
         let config = WhatsAppConfig {
             enabled: true,
             phone_number: "1234567890".to_string(),
+            self_chat_mode: true,
+            account_id: Some("test".to_string()),
         };
 
         let mock_router = Arc::new(crate::core::Router::new(

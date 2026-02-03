@@ -37,12 +37,53 @@ impl<S: Storage> SessionManager<S> {
         }
     }
 
+    /// Parse channel routing mode from config
+    fn get_channel_routing_mode(&self) -> crate::config::ChannelRoutingMode {
+        match self.config.channel_routing.as_str() {
+            "shared" => crate::config::ChannelRoutingMode::Shared,
+            "bridged" => crate::config::ChannelRoutingMode::Bridged,
+            _ => crate::config::ChannelRoutingMode::Isolated, // Default to isolated
+        }
+    }
+
+    /// Determine effective channel based on routing mode
+    fn get_effective_channel(&self, channel: &str) -> String {
+        match self.get_channel_routing_mode() {
+            crate::config::ChannelRoutingMode::Isolated => {
+                // Each channel has separate sessions
+                channel.to_string()
+            }
+            crate::config::ChannelRoutingMode::Shared => {
+                // All channels share same session
+                "global".to_string()
+            }
+            crate::config::ChannelRoutingMode::Bridged => {
+                // For now, use isolated (bridge lookups would go here)
+                channel.to_string()
+            }
+        }
+    }
+
     /// Get or create a session for a user
     pub async fn get_or_create_session(&self, user_id: &str, channel: &str) -> Result<Session> {
         let scope = &self.config.scope;
+        let effective_channel = self.get_effective_channel(channel);
+
+        tracing::info!(
+            "Session lookup: user={}, channel={}, effective_channel={}, scope={}, routing={}",
+            user_id,
+            channel,
+            effective_channel,
+            scope,
+            self.config.channel_routing
+        );
 
         // Try to find existing session
-        if let Some(session) = self.storage.find_session(user_id, channel, scope).await? {
+        if let Some(session) = self
+            .storage
+            .find_session(user_id, &effective_channel, scope)
+            .await?
+        {
             // Update last accessed time
             let mut updated = session.clone();
             updated.updated_at = Utc::now();
@@ -62,7 +103,7 @@ impl<S: Storage> SessionManager<S> {
         let storage_session = StorageSession {
             id: session_id.clone(),
             user_id: user_id.to_string(),
-            channel: channel.to_string(),
+            channel: effective_channel.clone(),
             scope: scope.clone(),
             created_at: now,
             updated_at: now,
@@ -73,7 +114,7 @@ impl<S: Storage> SessionManager<S> {
         Ok(Session {
             id: session_id,
             user_id: user_id.to_string(),
-            channel: channel.to_string(),
+            channel: effective_channel,
         })
     }
 

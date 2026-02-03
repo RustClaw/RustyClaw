@@ -131,6 +131,12 @@ pub struct WhatsAppChannelConfig {
     pub phone_number: String,
     #[serde(default)]
     pub local_gateway_url: Option<String>,
+    /// Enable self-chat mode (only respond to messages from yourself)
+    #[serde(default = "default_self_chat_mode")]
+    pub self_chat_mode: bool,
+    /// Account ID for multi-account support (defaults to phone number)
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +145,21 @@ pub struct SessionsConfig {
     pub scope: String,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
+    /// Channel routing mode: isolated, shared, or bridged
+    #[serde(default = "default_channel_routing")]
+    pub channel_routing: String,
+}
+
+/// Channel routing modes for cross-channel context sharing
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelRoutingMode {
+    /// Each channel has isolated sessions (default)
+    Isolated,
+    /// All channels share the same session for a user
+    Shared,
+    /// Channels can be bridged via explicit commands
+    Bridged,
 }
 
 impl Default for SessionsConfig {
@@ -146,6 +167,7 @@ impl Default for SessionsConfig {
         Self {
             scope: default_scope(),
             max_tokens: default_max_tokens(),
+            channel_routing: default_channel_routing(),
         }
     }
 }
@@ -242,4 +264,12 @@ fn default_max_models() -> usize {
 
 fn default_eviction() -> String {
     "lru".to_string()
+}
+
+fn default_self_chat_mode() -> bool {
+    true
+}
+
+fn default_channel_routing() -> String {
+    "isolated".to_string()
 }

@@ -18,6 +18,11 @@ pub async fn execute_tool(name: &str, arguments: &str) -> Result<String> {
                 .context("Failed to parse list_whatsapp_groups parameters")?;
             whatsapp::list_whatsapp_groups(_params).await
         }
+        "list_whatsapp_accounts" => {
+            let _params: whatsapp::ListWhatsAppAccountsParams = serde_json::from_str(arguments)
+                .context("Failed to parse list_whatsapp_accounts parameters")?;
+            whatsapp::list_whatsapp_accounts(_params).await
+        }
         _ => Err(anyhow!("Unknown tool: {}", name)),
     }
 }
