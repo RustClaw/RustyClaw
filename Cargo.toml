@@ -27,7 +27,11 @@ sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate
 # Channel adapters
 teloxide = { version = "0.12", features = ["macros"] }
 serenity = { version = "0.12", features = ["client", "gateway", "model", "cache"] }
-whatsapp-rust = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main", default-features = false }
+whatsapp-rust = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main", default-features = false, features = ["sqlite-storage"] }
+whatsapp-rust-tokio-transport = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
+whatsapp-rust-ureq-http-client = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
+wacore = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
+waproto = { git = "https://github.com/0ldev/whatsapp-rust.git", branch = "main" }
 
 # HTTP client
 reqwest = { version = "0.11", features = ["json", "stream"] }

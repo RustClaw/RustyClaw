@@ -5,7 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
+use wacore::types::events::Event;
+use waproto::whatsapp as wa;
+use whatsapp_rust::bot::MessageContext;
+use whatsapp_rust::store::SqliteStore;
+use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
+use whatsapp_rust_ureq_http_client::UreqHttpClient;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -176,11 +182,13 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
         Ok(())
     }
 
-    /// Run the WhatsApp bot with message handling via linked device protocol
+    /// Run the WhatsApp bot with event-driven message handling
     ///
-    /// NOTE: The whatsapp-rust library is still under active development.
-    /// This method initializes the bot and keeps it running. Once the library
-    /// fully exposes its message sending API, responses will be automatically sent.
+    /// The bot will:
+    /// 1. Display QR code for linked device pairing
+    /// 2. Listen for incoming messages
+    /// 3. Process messages through the Router
+    /// 4. Send responses back via WhatsApp (supports 1-on-1 and group chats)
     pub async fn run(&self) -> Result<()> {
         if !self.config.enabled {
             return Err(anyhow::anyhow!("WhatsApp is not enabled in configuration"));
@@ -188,25 +196,112 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
 
         info!("Initializing WhatsApp bot for linked device connection");
 
-        // TODO: Once whatsapp-rust exposes full event/message APIs:
-        // 1. Build bot with event handler
-        // 2. Register message event listener that calls router.handle_message()
-        // 3. Send responses back through bot.client()
-        // 4. Run bot with bot.run().await
+        // Set up storage backend
+        let creds_path = Self::creds_file_path()?;
+        let backend = Arc::new(
+            SqliteStore::new(creds_path.to_string_lossy().as_ref())
+                .await
+                .context("Failed to initialize SQLite backend")?,
+        );
 
-        // Currently, the library requires:
-        // - QR code scanning for linked device auth
-        // - Event handlers for incoming messages
-        // - Message sending through the client API
+        // Set up network transport
+        let transport_factory = TokioWebSocketTransportFactory::new();
 
-        info!("WhatsApp bot would run here once library API is complete");
+        // Set up HTTP client for media operations
+        let http_client = UreqHttpClient::new();
+
+        // Clone router for event handler
+        let router = self.router.clone();
+
+        // Build the bot with event handler
+        let mut bot = whatsapp_rust::bot::Bot::builder()
+            .with_backend(backend)
+            .with_transport_factory(transport_factory)
+            .with_http_client(http_client)
+            .on_event(move |event, _client| {
+                let router = router.clone();
+                async move {
+                    match event {
+                        Event::Message(message, info) => {
+                            // Extract sender JID and get message text
+                            let sender = info.source.sender.to_string();
+
+                            // Get text content from the message
+                            if let Some(text) = message.conversation.clone() {
+                                if text.trim().is_empty() {
+                                    return;
+                                }
+
+                                info!("WhatsApp message from {}: {}", sender, text);
+
+                                // Create message context for sending reply
+                                let ctx = MessageContext {
+                                    message: message.clone(),
+                                    info: info.clone(),
+                                    client: _client.clone(),
+                                };
+
+                                // Process message through router
+                                match router.handle_message(&sender, "whatsapp", &text).await {
+                                    Ok(response) => {
+                                        // Create response message
+                                        let reply = wa::Message {
+                                            conversation: Some(response.content),
+                                            ..Default::default()
+                                        };
+
+                                        // Send response (works for 1-on-1 and groups)
+                                        if let Err(e) = ctx.send_message(reply).await {
+                                            error!(
+                                                "Failed to send WhatsApp response to {}: {}",
+                                                sender, e
+                                            );
+                                        } else {
+                                            info!("✓ Sent response to {}", sender);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Error processing WhatsApp message: {}", e);
+
+                                        // Send error message back to user
+                                        let error_reply = wa::Message {
+                                            conversation: Some(
+                                                "Sorry, I encountered an error processing your message.".to_string()
+                                            ),
+                                            ..Default::default()
+                                        };
+
+                                        if let Err(send_err) = ctx.send_message(error_reply).await {
+                                            error!("Failed to send error message: {}", send_err);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Event::Connected(_) => {
+                            info!("✅ WhatsApp bot connected successfully!");
+                        }
+                        Event::LoggedOut(_) => {
+                            error!("❌ WhatsApp bot was logged out!");
+                        }
+                        _ => {
+                            // Handle other events as needed
+                        }
+                    }
+                }
+            })
+            .build()
+            .await
+            .context("Failed to initialize WhatsApp bot")?;
+
+        info!("WhatsApp bot running and listening for messages");
         info!(
             "Credentials location: {}",
             Self::creds_file_path()?.display()
         );
 
-        // Keep process alive (in production, this would be the bot.run() call)
-        tokio::signal::ctrl_c().await?;
+        // Run the bot (blocks until completion or shutdown)
+        bot.run().await.context("WhatsApp bot error")?;
 
         info!("WhatsApp bot shutting down");
 
