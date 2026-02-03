@@ -135,8 +135,7 @@ mod tests {
     fn test_list_whatsapp_groups_params() {
         let params = ListWhatsAppGroupsParams {};
         let json = serde_json::to_string(&params).unwrap();
-        let deserialized: ListWhatsAppGroupsParams = serde_json::from_str(&json).unwrap();
+        let _deserialized: ListWhatsAppGroupsParams = serde_json::from_str(&json).unwrap();
         // Just verify it deserializes without error
-        drop(deserialized);
     }
 }
