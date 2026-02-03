@@ -1,4 +1,6 @@
-use super::{CacheManager, ChatMessage, ChatRequest, ChatResponse, ModelRouter, TokenUsage};
+use super::{
+    CacheManager, ChatMessage, ChatRequest, ChatResponse, ModelRouter, TokenUsage, ToolCall,
+};
 use crate::config::LlmConfig;
 use anyhow::{Context, Result};
 use async_openai::{
@@ -91,6 +93,38 @@ impl Client {
             req_builder.temperature(temperature);
         }
 
+        // Add tools if provided
+        if let Some(tools) = request.tools {
+            // Convert our ToolDefinition to OpenAI format
+            let openai_tools: Vec<serde_json::Value> = tools
+                .into_iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                    })
+                })
+                .collect();
+
+            if !openai_tools.is_empty() {
+                let converted_tools: Vec<async_openai::types::ChatCompletionTool> = openai_tools
+                    .into_iter()
+                    .filter_map(|tool| serde_json::from_value(tool).ok())
+                    .collect();
+
+                if !converted_tools.is_empty() {
+                    req_builder.tools(converted_tools);
+                    // Use auto tool choice to let the model decide
+                    req_builder
+                        .tool_choice(async_openai::types::ChatCompletionToolChoiceOption::Auto);
+                }
+            }
+        }
+
         let req = req_builder
             .build()
             .context("Failed to build chat completion request")?;
@@ -110,6 +144,18 @@ impl Client {
 
         let content = choice.message.content.clone().unwrap_or_default();
 
+        // Extract tool calls if present
+        let tool_calls = choice.message.tool_calls.as_ref().map(|calls| {
+            calls
+                .iter()
+                .map(|call| ToolCall {
+                    id: call.id.clone(),
+                    name: call.function.name.clone(),
+                    arguments: call.function.arguments.clone(),
+                })
+                .collect::<Vec<ToolCall>>()
+        });
+
         // Extract token usage if available
         let usage = response.usage.as_ref().map(|u| TokenUsage {
             prompt_tokens: u.prompt_tokens as usize,
@@ -123,22 +169,40 @@ impl Client {
             cache.mark_used(&model);
         }
 
-        tracing::info!(
-            "Received response from LLM: model={}, tokens={:?}",
-            model,
-            usage
-        );
+        // Log response details
+        if let Some(ref calls) = tool_calls {
+            if !calls.is_empty() {
+                let tool_names: Vec<&str> = calls.iter().map(|t| t.name.as_str()).collect();
+                tracing::info!(
+                    "Received response with tool calls: model={}, tools={:?}",
+                    model,
+                    tool_names
+                );
+            }
+        } else {
+            tracing::info!(
+                "Received response from LLM: model={}, tokens={:?}",
+                model,
+                usage
+            );
+        }
 
         Ok(ChatResponse {
             content,
             model: response.model,
             finish_reason: choice.finish_reason.as_ref().map(|r| format!("{:?}", r)),
             usage,
+            tool_calls,
         })
     }
 
     pub fn primary_model(&self) -> &str {
         &self.config.models.primary
+    }
+
+    /// Route a message to the appropriate model based on content
+    pub fn route_model(&self, content: &str) -> &str {
+        self.router.route(content)
     }
 
     fn convert_message(&self, msg: &ChatMessage) -> Result<ChatCompletionRequestMessage> {

@@ -32,11 +32,19 @@ pub struct ChatRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
     pub model: String,
     pub finish_reason: Option<String>,
     pub usage: Option<TokenUsage>,
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 #[derive(Debug, Clone)]

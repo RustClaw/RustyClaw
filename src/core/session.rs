@@ -1,5 +1,5 @@
 use crate::config::SessionsConfig;
-use crate::llm::{ChatMessage, ChatRequest, Client as LlmClient};
+use crate::llm::{ChatMessage, ChatRequest, Client as LlmClient, ToolDefinition};
 use crate::storage::{Message as StorageMessage, Session as StorageSession, Storage};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -79,6 +79,7 @@ impl<S: Storage> SessionManager<S> {
 
     /// Process a user message and return the assistant's response
     /// This is the main method for handling conversations
+    /// Handles tool calling with automatic feedback loops
     pub async fn process_message(
         &self,
         session_id: &str,
@@ -88,6 +89,20 @@ impl<S: Storage> SessionManager<S> {
         self.add_message(session_id, "user", user_message, None, None)
             .await?;
 
+        // Get tools available
+        let tools = self.get_available_tools();
+
+        // Process message through LLM with tool calling
+        self.process_with_tools(session_id, tools).await
+    }
+
+    /// Process message with tool support
+    /// Handles tool calling loops until the model generates final response
+    async fn process_with_tools(
+        &self,
+        session_id: &str,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<MessageResponse> {
         // Get conversation history
         let history = self
             .storage
@@ -96,7 +111,7 @@ impl<S: Storage> SessionManager<S> {
             .context("Failed to get message history")?;
 
         // Convert storage messages to LLM messages
-        let llm_messages: Vec<ChatMessage> = history
+        let mut llm_messages: Vec<ChatMessage> = history
             .iter()
             .map(|msg| ChatMessage {
                 role: msg.role.clone(),
@@ -105,49 +120,114 @@ impl<S: Storage> SessionManager<S> {
             .collect();
 
         tracing::info!(
-            "Processing message for session {}: {} messages in context",
+            "Processing message for session {}: {} messages in context, {} tools available",
             session_id,
-            llm_messages.len()
+            llm_messages.len(),
+            tools.len()
         );
 
-        // Send to LLM (model will be auto-routed based on content)
-        let request = ChatRequest {
-            model: String::new(), // Empty = auto-route
-            messages: llm_messages,
-            max_tokens: None,
-            temperature: None,
-            tools: None, // TODO: Enable WhatsApp tools when available
+        // Determine model to use (auto-route based on last user message)
+        let model = if let Some(last_user_msg) = llm_messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+        {
+            self.llm_client.route_model(last_user_msg).to_string()
+        } else {
+            self.llm_client.primary_model().to_string()
         };
 
-        let response = self
-            .llm_client
-            .chat(request)
-            .await
-            .context("Failed to get LLM response")?;
+        // Tool calling loop - continue until no more tool calls
+        loop {
+            // Send request to LLM
+            let request = ChatRequest {
+                model: model.clone(),
+                messages: llm_messages.clone(),
+                max_tokens: None,
+                temperature: None,
+                tools: if tools.is_empty() {
+                    None
+                } else {
+                    Some(tools.clone())
+                },
+            };
 
-        let tokens = response.usage.as_ref().map(|u| u.total_tokens);
+            let response = self
+                .llm_client
+                .chat(request)
+                .await
+                .context("Failed to get LLM response")?;
 
-        // Add assistant response to storage
-        self.add_message(
-            session_id,
-            "assistant",
-            &response.content,
-            Some(&response.model),
-            tokens,
-        )
-        .await?;
+            // Check if we have tool calls to process
+            if let Some(tool_calls) = response.tool_calls {
+                tracing::info!("LLM generated {} tool calls", tool_calls.len());
 
-        tracing::info!(
-            "Response generated: model={}, tokens={:?}",
-            response.model,
-            tokens
-        );
+                // Add assistant response to message history (contains tool_use)
+                llm_messages.push(ChatMessage {
+                    role: "assistant".to_string(),
+                    content: response.content.clone(),
+                });
 
-        Ok(MessageResponse {
-            content: response.content,
-            model: response.model,
-            tokens,
-        })
+                // Execute each tool and collect results
+                for tool_call in tool_calls {
+                    tracing::info!("Executing tool: {}", tool_call.name);
+
+                    let result =
+                        match crate::tools::execute_tool(&tool_call.name, &tool_call.arguments)
+                            .await
+                        {
+                            Ok(result) => {
+                                tracing::info!("Tool {} succeeded", tool_call.name);
+                                result
+                            }
+                            Err(err) => {
+                                tracing::error!("Tool {} failed: {}", tool_call.name, err);
+                                format!("Error: {}", err)
+                            }
+                        };
+
+                    // Add tool result to message history
+                    llm_messages.push(ChatMessage {
+                        role: "user".to_string(),
+                        content: format!("Tool {} result: {}", tool_call.name, result),
+                    });
+                }
+            } else {
+                // No tool calls - this is the final response
+                tracing::info!(
+                    "Final response generated: model={}, tokens={}",
+                    response.model,
+                    response.usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
+                );
+
+                // Add final assistant response to storage
+                self.add_message(
+                    session_id,
+                    "assistant",
+                    &response.content,
+                    Some(&response.model),
+                    response.usage.as_ref().map(|u| u.total_tokens),
+                )
+                .await?;
+
+                return Ok(MessageResponse {
+                    content: response.content,
+                    model: response.model,
+                    tokens: response.usage.map(|u| u.total_tokens),
+                });
+            }
+        }
+    }
+
+    /// Get available tools for this session
+    fn get_available_tools(&self) -> Vec<ToolDefinition> {
+        // For now, always enable WhatsApp tools if service is available
+        if crate::get_whatsapp_service().is_some() {
+            crate::tools::whatsapp::get_whatsapp_tool_definitions()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Add a message to a session
