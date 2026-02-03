@@ -116,6 +116,7 @@ impl<S: Storage> SessionManager<S> {
             messages: llm_messages,
             max_tokens: None,
             temperature: None,
+            tools: None, // TODO: Enable WhatsApp tools when available
         };
 
         let response = self

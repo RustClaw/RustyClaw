@@ -4,12 +4,26 @@ pub mod config;
 pub mod core;
 pub mod llm;
 pub mod storage;
+pub mod tools;
 
 pub use config::Config;
 pub use core::{Router, Session};
 pub use storage::Storage;
 
 use anyhow::Result;
+use once_cell::sync::OnceCell;
+use std::sync::Arc;
+
+// Global WhatsApp service registry
+static WHATSAPP_SERVICE: OnceCell<Arc<channels::whatsapp::WhatsAppService>> = OnceCell::new();
+
+pub fn set_whatsapp_service(service: Arc<channels::whatsapp::WhatsAppService>) {
+    WHATSAPP_SERVICE.set(service).ok();
+}
+
+pub fn get_whatsapp_service() -> Option<Arc<channels::whatsapp::WhatsAppService>> {
+    WHATSAPP_SERVICE.get().cloned()
+}
 
 pub async fn run(config: Config) -> Result<()> {
     tracing::info!("Starting RustyClaw gateway...");

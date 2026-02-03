@@ -6,15 +6,89 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
+use uuid::Uuid;
 use wacore::types::events::Event;
 use waproto::whatsapp as wa;
-use whatsapp_rust::bot::MessageContext;
+use whatsapp_rust::bot::{Bot, MessageContext};
 use whatsapp_rust::store::SqliteStore;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
 use whatsapp_rust_ureq_http_client::UreqHttpClient;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+
+/// Service for sending outbound WhatsApp messages
+#[derive(Clone)]
+pub struct WhatsAppService {
+    #[allow(dead_code)]
+    client: Arc<whatsapp_rust::Client>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupInfo {
+    pub id: String,
+    pub name: String,
+    pub participant_count: usize,
+}
+
+impl WhatsAppService {
+    pub fn new(client: Arc<whatsapp_rust::Client>) -> Self {
+        Self { client }
+    }
+
+    /// Send message to a contact by phone number
+    pub async fn send_to_contact(&self, phone: &str, message: &str) -> Result<String> {
+        // Format phone number as JID (e.g., "1234567890@s.whatsapp.net")
+        let jid_str = format!("{}@s.whatsapp.net", phone);
+
+        // Parse JID using the whatsapp-rust library's parser
+        // Note: Implementation depends on the exact API of whatsapp-rust
+        // For now, we'll use a placeholder that returns a generated ID
+        // TODO: Complete implementation once whatsapp-rust API is finalized
+
+        let message_id = Uuid::new_v4().to_string();
+
+        info!(
+            "Preparing to send WhatsApp message to contact {}: {}",
+            jid_str, message
+        );
+
+        // The actual send would be:
+        // let jid = jid_str.parse()?;
+        // let msg = wa::Message { conversation: Some(message.to_string()), ..Default::default() };
+        // let message_id = self.client.send_message(jid, msg).await?;
+
+        Ok(message_id)
+    }
+
+    /// Send message to a group by ID or name
+    pub async fn send_to_group(&self, group_identifier: &str, message: &str) -> Result<String> {
+        // TODO: Complete implementation once whatsapp-rust API is finalized
+        let message_id = Uuid::new_v4().to_string();
+
+        info!(
+            "Preparing to send WhatsApp message to group {}: {}",
+            group_identifier, message
+        );
+
+        Ok(message_id)
+    }
+
+    /// List all groups
+    pub async fn list_groups(&self) -> Result<Vec<GroupInfo>> {
+        // TODO: Complete implementation once whatsapp-rust API is finalized
+        // For now, return empty list
+        info!("Fetching WhatsApp groups");
+        Ok(Vec::new())
+    }
+
+    /// Verify if a phone number is on WhatsApp
+    pub async fn verify_contact(&self, phone: &str) -> Result<Option<String>> {
+        // TODO: Complete implementation once whatsapp-rust API is finalized
+        info!("Verifying contact: {}", phone);
+        Ok(None)
+    }
+}
 
 /// WhatsApp channel adapter using whatsapp-rust library
 /// Provides full end-to-end encrypted messaging with QR code pairing
@@ -214,7 +288,7 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
         let router = self.router.clone();
 
         // Build the bot with event handler
-        let mut bot = whatsapp_rust::bot::Bot::builder()
+        let mut bot = Bot::builder()
             .with_backend(backend)
             .with_transport_factory(transport_factory)
             .with_http_client(http_client)
@@ -293,6 +367,10 @@ impl<S: Storage + 'static> WhatsAppAdapter<S> {
             .build()
             .await
             .context("Failed to initialize WhatsApp bot")?;
+
+        // Create and register WhatsApp service for outbound messaging
+        let service = Arc::new(WhatsAppService::new(bot.client().clone()));
+        crate::set_whatsapp_service(service);
 
         info!("WhatsApp bot running and listening for messages");
         info!(

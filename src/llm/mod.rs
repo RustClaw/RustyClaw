@@ -7,6 +7,14 @@ pub use client::Client;
 pub use routing::ModelRouter;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -20,6 +28,7 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub max_tokens: Option<usize>,
     pub temperature: Option<f32>,
+    pub tools: Option<Vec<ToolDefinition>>,
 }
 
 #[derive(Debug, Clone)]
