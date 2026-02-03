@@ -66,7 +66,8 @@ impl SkillWatcher {
                         {
                             // The debouncer gives us an underlying EventKind through event.kind
                             // For skills, we treat both Create and Modify as reload, Remove as unload
-                            if matches!(&event.kind, notify_debouncer_mini::DebouncedEventKind::Any) {
+                            if matches!(&event.kind, notify_debouncer_mini::DebouncedEventKind::Any)
+                            {
                                 // Check if file still exists to determine if it's a create/modify or remove
                                 if path_buf.exists() {
                                     self.handle_skill_change(&path_buf).await;
