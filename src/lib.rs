@@ -3,6 +3,7 @@ pub mod channels;
 pub mod config;
 pub mod core;
 pub mod llm;
+pub mod plugins;
 pub mod sandbox;
 pub mod storage;
 pub mod tools;
