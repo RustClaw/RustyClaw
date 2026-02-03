@@ -707,6 +707,8 @@ mod tests {
                 sessions: Default::default(),
                 storage: Default::default(),
                 logging: Default::default(),
+                sandbox: Default::default(),
+                tools: Default::default(),
             },
             MockStorage::new(),
             crate::llm::Client::new(&crate::config::LlmConfig {

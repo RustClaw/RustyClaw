@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -13,6 +14,10 @@ pub struct Config {
     pub storage: StorageConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
+    #[serde(default)]
+    pub tools: ToolsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,4 +277,99 @@ fn default_self_chat_mode() -> bool {
 
 fn default_channel_routing() -> String {
     "isolated".to_string()
+}
+
+// Sandbox configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxConfig {
+    /// Sandbox mode: off, non-main, or all
+    #[serde(default = "default_sandbox_mode")]
+    pub mode: crate::sandbox::SandboxMode,
+
+    /// Container scope: session, agent, or shared
+    #[serde(default = "default_sandbox_scope")]
+    pub scope: crate::sandbox::ContainerScope,
+
+    /// Docker image to use
+    #[serde(default = "default_sandbox_image")]
+    pub image: String,
+
+    /// Workspace mode: none, ro (read-only), rw (read-write)
+    #[serde(default = "default_workspace_mode")]
+    pub workspace: crate::sandbox::WorkspaceMode,
+
+    /// Enable network access for containers
+    #[serde(default)]
+    pub network: bool,
+
+    /// Setup command to run when container starts
+    #[serde(default)]
+    pub setup_command: Option<String>,
+
+    /// Custom bind mounts
+    #[serde(default)]
+    pub mounts: Vec<String>,
+
+    /// Automatic pruning configuration
+    #[serde(default)]
+    pub pruning: crate::sandbox::PruningConfig,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_sandbox_mode(),
+            scope: default_sandbox_scope(),
+            image: default_sandbox_image(),
+            workspace: default_workspace_mode(),
+            network: false,
+            setup_command: None,
+            mounts: vec![],
+            pruning: Default::default(),
+        }
+    }
+}
+
+fn default_sandbox_mode() -> crate::sandbox::SandboxMode {
+    crate::sandbox::SandboxMode::NonMain
+}
+
+fn default_sandbox_scope() -> crate::sandbox::ContainerScope {
+    crate::sandbox::ContainerScope::Session
+}
+
+fn default_sandbox_image() -> String {
+    "ubuntu:22.04".to_string()
+}
+
+fn default_workspace_mode() -> crate::sandbox::WorkspaceMode {
+    crate::sandbox::WorkspaceMode::None
+}
+
+// Tools configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsConfig {
+    /// Tool access policies: tool_name -> access_level (allow, deny, elevated)
+    #[serde(default)]
+    pub policies: HashMap<String, String>,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            policies: HashMap::from([
+                ("exec".to_string(), "elevated".to_string()),
+                ("bash".to_string(), "elevated".to_string()),
+                ("python".to_string(), "elevated".to_string()),
+                ("send_whatsapp".to_string(), "allow".to_string()),
+                ("list_whatsapp_groups".to_string(), "allow".to_string()),
+                ("list_whatsapp_accounts".to_string(), "allow".to_string()),
+                ("web_fetch".to_string(), "elevated".to_string()),
+                ("web_search".to_string(), "elevated".to_string()),
+                ("read_file".to_string(), "elevated".to_string()),
+                ("write_file".to_string(), "elevated".to_string()),
+                ("list_files".to_string(), "elevated".to_string()),
+            ]),
+        }
+    }
 }

@@ -5,9 +5,59 @@ use super::whatsapp;
 
 /// Execute a tool by name with the given arguments
 pub async fn execute_tool(name: &str, arguments: &str) -> Result<String> {
+    execute_tool_with_context(name, arguments, None, false).await
+}
+
+/// Execute a tool with session context for policy and sandbox checks
+pub async fn execute_tool_with_context(
+    name: &str,
+    arguments: &str,
+    session_id: Option<&str>,
+    is_main_session: bool,
+) -> Result<String> {
     info!("Executing tool: {} with arguments: {}", name, arguments);
 
+    // Check tool policy if session_id is provided
+    if let Some(session_id) = session_id {
+        if let Some(policy) = crate::get_tool_policy_engine() {
+            policy
+                .check_permission(session_id, name)
+                .await
+                .context(format!("Tool policy check failed for tool: {}", name))?;
+        }
+    }
+
     match name {
+        "exec" => {
+            let params: super::exec::ExecParams = serde_json::from_str(arguments)
+                .context("Failed to parse exec parameters")?;
+
+            if let Some(session_id) = session_id {
+                if let Some(sandbox) = crate::get_sandbox_manager() {
+                    super::exec::exec_command(&sandbox, session_id, is_main_session, params)
+                        .await
+                } else {
+                    Err(anyhow!("Sandbox manager not initialized"))
+                }
+            } else {
+                Err(anyhow!("exec tool requires session context"))
+            }
+        }
+        "bash" => {
+            let params: super::exec::BashParams = serde_json::from_str(arguments)
+                .context("Failed to parse bash parameters")?;
+
+            if let Some(session_id) = session_id {
+                if let Some(sandbox) = crate::get_sandbox_manager() {
+                    super::exec::exec_bash(&sandbox, session_id, is_main_session, params)
+                        .await
+                } else {
+                    Err(anyhow!("Sandbox manager not initialized"))
+                }
+            } else {
+                Err(anyhow!("bash tool requires session context"))
+            }
+        }
         "send_whatsapp" => {
             let params: whatsapp::SendWhatsAppParams = serde_json::from_str(arguments)
                 .context("Failed to parse send_whatsapp parameters")?;

@@ -3,11 +3,13 @@ pub mod channels;
 pub mod config;
 pub mod core;
 pub mod llm;
+pub mod sandbox;
 pub mod storage;
 pub mod tools;
 
 pub use config::Config;
 pub use core::{Router, Session};
+pub use sandbox::SandboxManager;
 pub use storage::Storage;
 
 use anyhow::Result;
@@ -21,6 +23,12 @@ type WhatsAppServicesRegistry =
 
 // Global WhatsApp service registry (supports multiple accounts)
 static WHATSAPP_SERVICES: OnceCell<WhatsAppServicesRegistry> = OnceCell::new();
+
+// Global sandbox manager
+static SANDBOX_MANAGER: OnceCell<Arc<SandboxManager>> = OnceCell::new();
+
+// Global tool policy engine
+static TOOL_POLICY_ENGINE: OnceCell<Arc<tools::policy::ToolPolicyEngine>> = OnceCell::new();
 
 /// Initialize the global WhatsApp services registry
 pub fn init_whatsapp_services() {
@@ -85,11 +93,45 @@ pub fn set_whatsapp_service(service: Arc<channels::whatsapp::WhatsAppService>) {
     services.insert("default".to_string(), service);
 }
 
+/// Get the global sandbox manager
+pub fn get_sandbox_manager() -> Option<Arc<SandboxManager>> {
+    SANDBOX_MANAGER.get().cloned()
+}
+
+/// Get the global tool policy engine
+pub fn get_tool_policy_engine() -> Option<Arc<tools::policy::ToolPolicyEngine>> {
+    TOOL_POLICY_ENGINE.get().cloned()
+}
+
 pub async fn run(config: Config) -> Result<()> {
     tracing::info!("Starting RustyClaw gateway...");
 
     // Initialize WhatsApp services registry
     init_whatsapp_services();
+
+    // Initialize sandbox manager if sandboxing is not disabled
+    if config.sandbox.mode != sandbox::SandboxMode::Off {
+        tracing::info!(
+            "Initializing sandbox manager (mode: {:?})",
+            config.sandbox.mode
+        );
+        let sandbox = SandboxManager::new(config.sandbox.clone()).await?;
+        SANDBOX_MANAGER.set(Arc::new(sandbox)).ok();
+        tracing::info!("✅ Sandbox manager initialized");
+    } else {
+        tracing::info!("Sandbox disabled (mode: off)");
+    }
+
+    // Initialize tool policy engine
+    let mut policies = std::collections::HashMap::new();
+    for (tool, level_str) in &config.tools.policies {
+        if let Ok(level) = level_str.parse::<tools::policy::ToolAccessLevel>() {
+            policies.insert(tool.clone(), level);
+        }
+    }
+    let policy_engine = tools::policy::ToolPolicyEngine::with_policies(policies);
+    TOOL_POLICY_ENGINE.set(Arc::new(policy_engine)).ok();
+    tracing::info!("✅ Tool policy engine initialized");
 
     // Initialize storage
     let storage = storage::sqlite::SqliteStorage::new(&config.storage.path).await?;
