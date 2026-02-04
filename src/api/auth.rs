@@ -70,17 +70,11 @@ impl AuthManager {
 
     /// Middleware for protecting routes
     pub async fn auth_middleware(
+        axum::extract::State(auth_manager): axum::extract::State<AuthManager>,
         headers: HeaderMap,
         mut request: Request,
         next: Next,
     ) -> Result<Response, ApiError> {
-        // Extract auth manager from extensions
-        let auth_manager = request
-            .extensions()
-            .get::<AuthManager>()
-            .ok_or_else(|| ApiError::InternalError("Auth not configured".to_string()))?
-            .clone();
-
         // Validate token
         let token = auth_manager.validate_token(&headers)?;
         let user_id = Self::token_to_user_id(&token);
@@ -88,6 +82,7 @@ impl AuthManager {
         // Store user ID in request extensions for use in handlers
         request.extensions_mut().insert(user_id);
         request.extensions_mut().insert(token);
+        request.extensions_mut().insert(auth_manager);
 
         Ok(next.run(request).await)
     }
