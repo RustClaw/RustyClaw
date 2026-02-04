@@ -72,6 +72,9 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 notify = "6"
 notify-debouncer-mini = "0.4"
 
+# Stream utilities for async
+tokio-stream = "0.1"
+
 [dev-dependencies]
 tempfile = "3.0"
 mockito = "1.0"

@@ -161,6 +161,9 @@ pub enum WebSocketMessage {
         latency_ms: u64,
     },
 
+    /// Server → Client: Tool execution status
+    ToolUse { name: String, status: String },
+
     /// Server → Client: Error occurred
     Error { error: String, error_code: u32 },
 

@@ -1,9 +1,10 @@
-use crate::api::{ApiError, WebSocketMessage};
-use crate::core::Router;
+use crate::api::{ApiError, AuthManager, WebSocketMessage};
+use crate::core::{Router, StreamEvent};
 use crate::storage::Storage;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
+use axum::Extension;
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -25,10 +26,11 @@ pub struct WsQuery {
 pub async fn websocket_handler<S: Storage + 'static>(
     ws: WebSocketUpgrade,
     State(router): State<Arc<Router<S>>>,
+    Extension(auth): Extension<AuthManager>,
     Query(params): Query<WsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // Validate token (same as auth middleware)
-    let user_id = crate::api::AuthManager::token_to_user_id(&params.token);
+    // Validate token
+    let user_id = auth.validate_token_str(&params.token)?;
 
     debug!(
         "WebSocket connection: user={}, session={:?}",
@@ -182,7 +184,7 @@ async fn process_and_stream<S: Storage + 'static>(
     sender: &mut SplitSink<WebSocket, Message>,
     router: Arc<Router<S>>,
     user_id: String,
-    session_id: String,
+    _session_id: String,
     content: String,
 ) -> Result<(), ApiError> {
     // Validate input
@@ -201,7 +203,7 @@ async fn process_and_stream<S: Storage + 'static>(
 
     // Send start notification
     let start_msg = WebSocketMessage::Start {
-        session_id: session_id.clone(),
+        session_id: message_id.clone(),
         message_id: message_id.clone(),
     };
     if let Ok(json) = start_msg.to_json() {
@@ -211,40 +213,86 @@ async fn process_and_stream<S: Storage + 'static>(
             .map_err(|_| ApiError::InternalError("Failed to send message".to_string()))?;
     }
 
-    // Process message through router
-    let response = router
-        .handle_message(&user_id, "web", &content)
+    // Get streaming receiver from router
+    let mut receiver = router
+        .handle_message_stream(&user_id, "web", &content)
         .await
         .map_err(|e| {
             error!("Failed to handle message: {}", e);
             ApiError::InternalError("Failed to process message".to_string())
         })?;
 
-    // Stream response in chunks (for now, send whole response)
-    // In production, could chunk larger responses
-    let stream_msg = WebSocketMessage::Stream {
-        content: response.content.clone(),
-    };
-    if let Ok(json) = stream_msg.to_json() {
-        sender
-            .send(Message::Text(json))
-            .await
-            .map_err(|_| ApiError::InternalError("Failed to send message".to_string()))?;
-    }
+    // Consume stream events
+    let mut total_tokens = 0;
+    let final_model: String;
+    while let Some(event) = receiver.recv().await {
+        match event {
+            StreamEvent::Delta(text) => {
+                // Send content chunk
+                let stream_msg = WebSocketMessage::Stream { content: text };
+                if let Ok(json) = stream_msg.to_json() {
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        // Client disconnected
+                        return Ok(());
+                    }
+                }
+            }
+            StreamEvent::ToolStart { name } => {
+                // Send tool start event
+                let tool_msg = WebSocketMessage::ToolUse {
+                    name,
+                    status: "running".to_string(),
+                };
+                if let Ok(json) = tool_msg.to_json() {
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+            StreamEvent::ToolEnd { name, .. } => {
+                // Send tool end event
+                let tool_msg = WebSocketMessage::ToolUse {
+                    name,
+                    status: "done".to_string(),
+                };
+                if let Ok(json) = tool_msg.to_json() {
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+            StreamEvent::Done { model, usage } => {
+                // Extract final stats
+                final_model = model;
+                if let Some(u) = usage {
+                    total_tokens = u.total_tokens;
+                }
 
-    // Send end notification
-    let latency_ms = start.elapsed().as_millis() as u64;
-    let end_msg = WebSocketMessage::End {
-        message_id,
-        total_tokens: response.tokens.unwrap_or(0),
-        model: response.model,
-        latency_ms,
-    };
-    if let Ok(json) = end_msg.to_json() {
-        sender
-            .send(Message::Text(json))
-            .await
-            .map_err(|_| ApiError::InternalError("Failed to send message".to_string()))?;
+                // Send end notification
+                let latency_ms = start.elapsed().as_millis() as u64;
+                let end_msg = WebSocketMessage::End {
+                    message_id,
+                    total_tokens,
+                    model: final_model,
+                    latency_ms,
+                };
+                if let Ok(json) = end_msg.to_json() {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                break;
+            }
+            StreamEvent::Error(msg) => {
+                error!("Stream error: {}", msg);
+                let err_msg = WebSocketMessage::Error {
+                    error: msg,
+                    error_code: 500,
+                };
+                if let Ok(json) = err_msg.to_json() {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                break;
+            }
+        }
     }
 
     Ok(())

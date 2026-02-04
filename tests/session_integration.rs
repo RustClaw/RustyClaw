@@ -196,6 +196,7 @@ async fn test_router_conversation() {
         logging: Default::default(),
         sandbox: Default::default(),
         tools: Default::default(),
+        api: Default::default(),
     };
 
     let router = Router::new(config, storage, llm_client);

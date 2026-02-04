@@ -37,6 +37,16 @@ fn substitute_env_vars(mut config: Config) -> Result<Config> {
         }
     }
 
+    // Substitute API tokens (iterate through list)
+    for token in &mut config.api.tokens {
+        if token.starts_with("${") && token.ends_with("}") {
+            let var_name = &token[2..token.len() - 1];
+            if let Ok(val) = std::env::var(var_name) {
+                *token = val;
+            }
+        }
+    }
+
     Ok(config)
 }
 
@@ -60,6 +70,11 @@ fn validate_config(config: &Config) -> Result<()> {
     let valid_scopes = ["per-sender", "main", "per-peer", "per-channel-peer"];
     if !valid_scopes.contains(&config.sessions.scope.as_str()) {
         anyhow::bail!("Invalid session scope: {}", config.sessions.scope);
+    }
+
+    // Validate API config
+    if config.api.enabled && config.api.tokens.is_empty() {
+        anyhow::bail!("API is enabled but no tokens provided");
     }
 
     Ok(())

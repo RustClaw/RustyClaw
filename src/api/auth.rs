@@ -56,6 +56,18 @@ impl AuthManager {
         }
     }
 
+    /// Validate a raw token string (for WebSocket query-param auth)
+    pub fn validate_token_str(&self, token: &str) -> Result<String, ApiError> {
+        if token.is_empty() {
+            return Err(ApiError::Unauthorized("Token cannot be empty".to_string()));
+        }
+        if !self.valid_tokens.contains(&token.to_string()) {
+            tracing::warn!("Invalid token attempt (ws)");
+            return Err(ApiError::Unauthorized("Invalid token".to_string()));
+        }
+        Ok(Self::token_to_user_id(token))
+    }
+
     /// Middleware for protecting routes
     pub async fn auth_middleware(
         headers: HeaderMap,
@@ -145,5 +157,21 @@ mod tests {
             headers
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_token_str() {
+        let tokens = vec!["test-token".to_string(), "another-token".to_string()];
+        let auth = AuthManager::new(tokens);
+
+        // Valid token
+        assert!(auth.validate_token_str("test-token").is_ok());
+        assert!(auth.validate_token_str("another-token").is_ok());
+
+        // Invalid token
+        assert!(auth.validate_token_str("invalid-token").is_err());
+
+        // Empty token
+        assert!(auth.validate_token_str("").is_err());
     }
 }

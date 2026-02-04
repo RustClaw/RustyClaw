@@ -1,5 +1,6 @@
 use super::{
-    CacheManager, ChatMessage, ChatRequest, ChatResponse, ModelRouter, TokenUsage, ToolCall,
+    CacheManager, ChatMessage, ChatRequest, ChatResponse, ModelRouter, StreamChunk, TokenUsage,
+    ToolCall, ToolCallChunk,
 };
 use crate::config::LlmConfig;
 use anyhow::{Context, Result};
@@ -12,6 +13,8 @@ use async_openai::{
     },
     Client as OpenAIClient,
 };
+use futures::{Stream, StreamExt};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -203,6 +206,151 @@ impl Client {
     /// Route a message to the appropriate model based on content
     pub fn route_model(&self, content: &str) -> &str {
         self.router.route(content)
+    }
+
+    /// Stream chat completion (for streaming responses)
+    pub async fn chat_stream(
+        &self,
+        request: ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
+        // Determine which model to use via routing
+        let model = if request.model.is_empty() {
+            // Auto-route based on last user message
+            let last_message = request
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+
+            self.router.route(last_message).to_string()
+        } else {
+            // Use explicitly specified model
+            request.model.clone()
+        };
+
+        // Get keep_alive from cache strategy
+        let keep_alive = {
+            let cache = self.cache_manager.lock().await;
+            cache.keep_alive()
+        };
+
+        tracing::info!(
+            "Streaming request to LLM: model={}, keep_alive={}, messages={}",
+            model,
+            keep_alive,
+            request.messages.len()
+        );
+
+        // Convert messages
+        let messages: Result<Vec<ChatCompletionRequestMessage>> = request
+            .messages
+            .iter()
+            .map(|msg| self.convert_message(msg))
+            .collect();
+        let messages = messages?;
+
+        // Build request
+        let mut req_builder = CreateChatCompletionRequestArgs::default();
+        req_builder.model(&model);
+        req_builder.messages(messages);
+
+        if let Some(max_tokens) = request.max_tokens {
+            req_builder.max_tokens(max_tokens as u16);
+        }
+
+        if let Some(temperature) = request.temperature {
+            req_builder.temperature(temperature);
+        }
+
+        // Add tools if provided
+        if let Some(tools) = request.tools {
+            // Convert our ToolDefinition to OpenAI format
+            let openai_tools: Vec<serde_json::Value> = tools
+                .into_iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                    })
+                })
+                .collect();
+
+            if !openai_tools.is_empty() {
+                let converted_tools: Vec<async_openai::types::ChatCompletionTool> = openai_tools
+                    .into_iter()
+                    .filter_map(|tool| serde_json::from_value(tool).ok())
+                    .collect();
+
+                if !converted_tools.is_empty() {
+                    req_builder.tools(converted_tools);
+                    req_builder
+                        .tool_choice(async_openai::types::ChatCompletionToolChoiceOption::Auto);
+                }
+            }
+        }
+
+        let req = req_builder
+            .build()
+            .context("Failed to build chat completion request")?;
+
+        // Send streaming request to Ollama/LLM backend
+        let stream = self
+            .client
+            .chat()
+            .create_stream(req)
+            .await
+            .context("Failed to create chat stream")?;
+
+        // Mark model as used in cache
+        {
+            let mut cache = self.cache_manager.lock().await;
+            cache.mark_used(&model);
+        }
+
+        // Convert stream items to our StreamChunk type
+        let model_clone = model.clone();
+        let mapped_stream = stream.map(move |result| {
+            result.context("Stream error").map(|response| {
+                let choice = response.choices.first();
+                let content = choice
+                    .and_then(|c| c.delta.content.clone())
+                    .filter(|s| !s.is_empty());
+
+                let tool_calls = choice
+                    .and_then(|c| c.delta.tool_calls.as_ref())
+                    .map(|calls| {
+                        calls
+                            .iter()
+                            .map(|tc| ToolCallChunk {
+                                index: tc.index as usize,
+                                id: tc.id.clone(),
+                                name: tc.function.as_ref().and_then(|f| f.name.clone()),
+                                arguments: tc.function.as_ref().and_then(|f| f.arguments.clone()),
+                            })
+                            .collect()
+                    });
+
+                let finish_reason = choice
+                    .and_then(|c| c.finish_reason.as_ref())
+                    .map(|r| format!("{:?}", r));
+
+                StreamChunk {
+                    content,
+                    tool_calls: tool_calls.filter(|tc: &Vec<ToolCallChunk>| !tc.is_empty()),
+                    finish_reason,
+                    model: Some(model_clone.clone()),
+                    usage: None, // Stream responses don't include usage info
+                }
+            })
+        });
+
+        Ok(Box::pin(mapped_stream))
     }
 
     fn convert_message(&self, msg: &ChatMessage) -> Result<ChatCompletionRequestMessage> {

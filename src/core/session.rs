@@ -3,7 +3,26 @@ use crate::llm::{ChatMessage, ChatRequest, Client as LlmClient, ToolDefinition};
 use crate::storage::{Message as StorageMessage, Session as StorageSession, Storage};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+/// Stream events sent from process_message_stream
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// Content token(s) from LLM
+    Delta(String),
+    /// About to execute a tool
+    ToolStart { name: String },
+    /// Tool finished executing
+    ToolEnd { name: String, result: String },
+    /// Streaming finished
+    Done {
+        model: String,
+        usage: Option<crate::llm::TokenUsage>,
+    },
+    /// Error occurred
+    Error(String),
+}
 
 /// Session manager with LLM integration
 #[derive(Clone)]
@@ -28,7 +47,7 @@ pub struct MessageResponse {
     pub tokens: Option<usize>,
 }
 
-impl<S: Storage> SessionManager<S> {
+impl<S: Storage + 'static> SessionManager<S> {
     pub fn new(storage: S, config: SessionsConfig, llm_client: LlmClient) -> Self {
         Self {
             storage,
@@ -135,6 +154,51 @@ impl<S: Storage> SessionManager<S> {
 
         // Process message through LLM with tool calling
         self.process_with_tools(session_id, tools).await
+    }
+
+    /// Process a user message with streaming (returns receiver for StreamEvent)
+    /// Note: This method is only available when S: 'static (defined in separate impl block)
+    pub async fn process_message_stream_unimplemented(
+        &self,
+        _session_id: &str,
+        _user_message: &str,
+    ) -> Result<mpsc::Receiver<StreamEvent>> {
+        Err(anyhow::anyhow!("Not implemented for non-static storage"))
+    }
+}
+
+impl<S: Storage + 'static> SessionManager<S> {
+    /// Process a user message with streaming (returns receiver for StreamEvent)
+    pub async fn process_message_stream(
+        &self,
+        session_id: &str,
+        user_message: &str,
+    ) -> Result<mpsc::Receiver<StreamEvent>> {
+        // Add user message to storage
+        self.add_message(session_id, "user", user_message, None, None)
+            .await?;
+
+        // Get tools available
+        let tools = self.get_available_tools();
+
+        // Create channel for streaming events
+        let (tx, rx) = mpsc::channel::<StreamEvent>(32);
+
+        // Clone what we need for the spawned task
+        let storage = self.storage.clone();
+        let llm_client = self.llm_client.clone();
+        let session_id = session_id.to_string();
+
+        // Spawn streaming task
+        tokio::spawn(async move {
+            if let Err(e) =
+                process_message_stream_task(storage, llm_client, session_id, tools, tx).await
+            {
+                tracing::error!("Error in streaming task: {}", e);
+            }
+        });
+
+        Ok(rx)
     }
 
     /// Process message with tool support
@@ -406,4 +470,246 @@ pub struct SessionStats {
     pub assistant_messages: usize,
     pub total_tokens: usize,
     pub models_used: std::collections::HashMap<String, usize>,
+}
+
+/// Accumulated tool call during streaming
+struct AccumulatedToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// Streaming task worker function
+async fn process_message_stream_task<S: Storage + 'static>(
+    storage: S,
+    llm_client: crate::llm::Client,
+    session_id: String,
+    tools: Vec<ToolDefinition>,
+    tx: mpsc::Sender<StreamEvent>,
+) -> Result<()> {
+    use futures::StreamExt;
+    use std::collections::HashMap;
+
+    // Get conversation history
+    let history = storage
+        .get_messages(&session_id, Some(50))
+        .await
+        .context("Failed to get message history")?;
+
+    // Convert storage messages to LLM messages
+    let mut llm_messages: Vec<ChatMessage> = history
+        .iter()
+        .map(|msg| ChatMessage {
+            role: msg.role.clone(),
+            content: msg.content.clone(),
+        })
+        .collect();
+
+    tracing::info!(
+        "Starting streaming for session {}: {} messages in context, {} tools available",
+        session_id,
+        llm_messages.len(),
+        tools.len()
+    );
+
+    // Determine model to use (auto-route based on last user message)
+    let model = if let Some(last_user_msg) = llm_messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.as_str())
+    {
+        llm_client.route_model(last_user_msg).to_string()
+    } else {
+        llm_client.primary_model().to_string()
+    };
+
+    // Tool calling loop - continue until no more tool calls
+    loop {
+        // Send request to LLM with streaming
+        let request = ChatRequest {
+            model: model.clone(),
+            messages: llm_messages.clone(),
+            max_tokens: None,
+            temperature: None,
+            tools: if tools.is_empty() {
+                None
+            } else {
+                Some(tools.clone())
+            },
+        };
+
+        let mut stream = match llm_client.chat_stream(request).await {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = tx
+                    .send(StreamEvent::Error(format!("LLM error: {}", e)))
+                    .await;
+                return Err(e);
+            }
+        };
+
+        // Accumulate content and tool calls during streaming
+        let mut content_buf = String::new();
+        let mut tool_calls_map: HashMap<usize, AccumulatedToolCall> = HashMap::new();
+        let mut finish_reason_: Option<String> = None;
+        let mut final_usage = None;
+
+        // Consume the stream
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(chunk) => {
+                    // Accumulate content
+                    if let Some(content) = &chunk.content {
+                        if !content.is_empty() {
+                            content_buf.push_str(content);
+                            // Send delta event (per-token)
+                            if tx.send(StreamEvent::Delta(content.clone())).await.is_err() {
+                                // Receiver dropped - client disconnected
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    // Accumulate tool calls
+                    if let Some(tool_calls) = &chunk.tool_calls {
+                        for tc in tool_calls {
+                            let entry = tool_calls_map.entry(tc.index).or_insert_with(|| {
+                                AccumulatedToolCall {
+                                    id: tc.id.clone().unwrap_or_default(),
+                                    name: tc.name.clone().unwrap_or_default(),
+                                    arguments: String::new(),
+                                }
+                            });
+
+                            if let Some(id) = &tc.id {
+                                entry.id = id.clone();
+                            }
+                            if let Some(name) = &tc.name {
+                                entry.name = name.clone();
+                            }
+                            if let Some(args) = &tc.arguments {
+                                entry.arguments.push_str(args);
+                            }
+                        }
+                    }
+
+                    // Track finish reason
+                    if let Some(reason) = &chunk.finish_reason {
+                        finish_reason_ = Some(reason.clone());
+                    }
+
+                    // Track usage
+                    if let Some(usage) = &chunk.usage {
+                        final_usage = Some(usage.clone());
+                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(StreamEvent::Error(format!("Stream error: {}", e)))
+                        .await;
+                    return Err(e);
+                }
+            }
+        }
+
+        // Check finish reason to determine if we have tool calls
+        if finish_reason_.as_deref() == Some("tool_calls") && !tool_calls_map.is_empty() {
+            tracing::info!("Streaming generated {} tool calls", tool_calls_map.len());
+
+            // Add assistant response to message history
+            llm_messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: content_buf.clone(),
+            });
+
+            // Execute tools (sort by index)
+            let mut sorted_tools: Vec<_> = tool_calls_map.into_iter().collect();
+            sorted_tools.sort_by_key(|a| a.0);
+
+            for (_idx, tool_call) in sorted_tools {
+                tracing::info!("Executing tool: {}", tool_call.name);
+
+                // Send tool start event
+                if tx
+                    .send(StreamEvent::ToolStart {
+                        name: tool_call.name.clone(),
+                    })
+                    .await
+                    .is_err()
+                {
+                    // Receiver dropped
+                    return Ok(());
+                }
+
+                // Execute tool
+                let result =
+                    match crate::tools::execute_tool(&tool_call.name, &tool_call.arguments).await {
+                        Ok(result) => {
+                            tracing::info!("Tool {} succeeded", tool_call.name);
+                            result
+                        }
+                        Err(err) => {
+                            tracing::error!("Tool {} failed: {}", tool_call.name, err);
+                            format!("Error: {}", err)
+                        }
+                    };
+
+                // Send tool end event
+                if tx
+                    .send(StreamEvent::ToolEnd {
+                        name: tool_call.name.clone(),
+                        result: result.clone(),
+                    })
+                    .await
+                    .is_err()
+                {
+                    // Receiver dropped
+                    return Ok(());
+                }
+
+                // Add tool result to message history
+                llm_messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: format!("Tool {} result: {}", tool_call.name, result),
+                });
+            }
+        } else {
+            // No tool calls - this is the final response
+            tracing::info!(
+                "Final response generated: model={}, tokens={}",
+                model,
+                final_usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
+            );
+
+            // Add final assistant response to storage
+            storage
+                .add_message(StorageMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    session_id: session_id.to_string(),
+                    role: "assistant".to_string(),
+                    content: content_buf,
+                    created_at: Utc::now(),
+                    model_used: Some(model.clone()),
+                    tokens: final_usage.as_ref().map(|u| u.total_tokens),
+                })
+                .await?;
+
+            // Send done event
+            if tx
+                .send(StreamEvent::Done {
+                    model,
+                    usage: final_usage,
+                })
+                .await
+                .is_err()
+            {
+                // Receiver dropped - client disconnected
+            }
+
+            break;
+        }
+    }
+
+    Ok(())
 }

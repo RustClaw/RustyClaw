@@ -43,7 +43,7 @@ pub async fn run<S: Storage + 'static>(config: TelegramConfig, router: Router<S>
     Ok(())
 }
 
-async fn handle_command<S: Storage>(
+async fn handle_command<S: Storage + 'static>(
     bot: Bot,
     msg: Message,
     cmd: Command,
@@ -89,7 +89,7 @@ async fn handle_command<S: Storage>(
     Ok(())
 }
 
-async fn handle_message<S: Storage>(
+async fn handle_message<S: Storage + 'static>(
     bot: Bot,
     msg: Message,
     router: Router<S>,

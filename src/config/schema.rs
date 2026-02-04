@@ -2,6 +2,29 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_api_host")]
+    pub host: String,
+    #[serde(default = "default_api_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub tokens: Vec<String>,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: default_api_host(),
+            port: default_api_port(),
+            tokens: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -18,6 +41,8 @@ pub struct Config {
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
+    #[serde(default)]
+    pub api: ApiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +302,14 @@ fn default_self_chat_mode() -> bool {
 
 fn default_channel_routing() -> String {
     "isolated".to_string()
+}
+
+fn default_api_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_api_port() -> u16 {
+    18789
 }
 
 // Sandbox configuration

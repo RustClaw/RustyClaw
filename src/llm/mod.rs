@@ -47,9 +47,26 @@ pub struct ChatResponse {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
     pub total_tokens: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamChunk {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallChunk>>,
+    pub finish_reason: Option<String>,
+    pub model: Option<String>,
+    pub usage: Option<TokenUsage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolCallChunk {
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }

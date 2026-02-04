@@ -12,7 +12,7 @@ pub struct Router<S: Storage> {
     session_manager: SessionManager<S>,
 }
 
-impl<S: Storage> Router<S> {
+impl<S: Storage + 'static> Router<S> {
     pub fn new(config: Config, storage: S, llm_client: LlmClient) -> Self {
         let session_manager = SessionManager::new(storage, config.sessions.clone(), llm_client);
 
@@ -94,5 +94,22 @@ impl<S: Storage> Router<S> {
         session_id: &str,
     ) -> Result<Vec<crate::storage::Message>> {
         self.session_manager.get_messages(session_id).await
+    }
+
+    /// Handle message with streaming (returns receiver for StreamEvent)
+    pub async fn handle_message_stream(
+        &self,
+        user_id: &str,
+        channel: &str,
+        content: &str,
+    ) -> Result<tokio::sync::mpsc::Receiver<crate::core::StreamEvent>> {
+        let session = self
+            .session_manager
+            .get_or_create_session(user_id, channel)
+            .await?;
+
+        self.session_manager
+            .process_message_stream(&session.id, content)
+            .await
     }
 }

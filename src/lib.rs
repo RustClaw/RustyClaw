@@ -164,6 +164,23 @@ pub async fn run(config: Config) -> Result<()> {
     // Start channel adapters
     let mut handles = vec![];
 
+    // Start Web API if enabled
+    if config.api.enabled {
+        tracing::info!(
+            "Starting Web API on {}:{}",
+            config.api.host,
+            config.api.port
+        );
+        let api_adapter = api::WebApiAdapter::new(
+            Arc::new(router.clone()),
+            config.api.host.clone(),
+            config.api.port,
+            config.api.tokens.clone(),
+        );
+        let api_handle = tokio::spawn(async move { api_adapter.start().await });
+        handles.push(api_handle);
+    }
+
     if config.channels.telegram.enabled {
         tracing::info!("Starting Telegram adapter...");
         let telegram_handle = tokio::spawn(channels::telegram::run(

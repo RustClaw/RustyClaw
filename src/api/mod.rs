@@ -64,7 +64,11 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
                 &self.ws_path,
                 axum::routing::get(websocket::websocket_handler),
             )
-            .with_state(self.router.clone());
+            .with_state(self.router.clone())
+            .layer(axum::middleware::from_fn_with_state(
+                self.auth_manager.clone(),
+                provide_auth_extension,
+            ));
 
         // Protected endpoints (auth required)
         let api_routes = AxumRouter::new()
@@ -165,6 +169,16 @@ async fn logging_middleware(
     tracing::info!("{} {} → {}", method, uri, status);
 
     response
+}
+
+/// Middleware to provide AuthManager as an extension
+async fn provide_auth_extension(
+    axum::extract::State(auth): axum::extract::State<AuthManager>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    request.extensions_mut().insert(auth);
+    next.run(request).await
 }
 
 #[cfg(test)]

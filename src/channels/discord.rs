@@ -119,7 +119,7 @@ fn is_authorized(msg: &Message, config: &DiscordConfig) -> bool {
 }
 
 /// Command handler
-async fn handle_command<S: Storage>(
+async fn handle_command<S: Storage + 'static>(
     ctx: &Context,
     msg: &Message,
     router: &Arc<Router<S>>,

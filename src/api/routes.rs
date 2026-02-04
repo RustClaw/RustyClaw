@@ -2,16 +2,22 @@ use crate::api::{
     ApiError, ApiResponse, ChatContent, ChatRequest, ChatResponse, MessageListResponse,
     MessageResponse, ModelInfo, ModelsResponse, SessionListResponse, SessionResponse,
 };
-use crate::core::Router;
+use crate::core::{Router, StreamEvent};
 use crate::storage::Storage;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::{
+    sse::{Event, Sse},
+    IntoResponse, Response,
+};
 use axum::Extension;
 use axum::Json;
 use chrono::Utc;
+use futures::StreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Query parameters for listing messages
 #[derive(Deserialize)]
@@ -168,12 +174,12 @@ pub async fn delete_session<S: Storage + 'static>(
 
 // ===== Chat Endpoints =====
 
-/// POST /api/chat - Send message and get response
+/// POST /api/chat - Send message and get response (supports streaming)
 pub async fn chat<S: Storage + 'static>(
     State(router): State<Arc<Router<S>>>,
     Extension(user_id): Extension<String>,
     Json(req): Json<ChatRequest>,
-) -> Result<(StatusCode, Json<ApiResponse<ChatResponse>>), ApiError> {
+) -> Result<axum::response::Response, ApiError> {
     // Validate input
     if req.message.is_empty() {
         return Err(ApiError::BadRequest("message cannot be empty".to_string()));
@@ -185,9 +191,14 @@ pub async fn chat<S: Storage + 'static>(
         ));
     }
 
+    // Handle streaming request
+    if req.stream {
+        return chat_stream_sse(router, user_id, req).await;
+    }
+
     let start = Instant::now();
 
-    // Process message through router
+    // Non-streaming path: process message through router
     let response = router
         .handle_message(&user_id, "web", &req.message)
         .await
@@ -231,7 +242,51 @@ pub async fn chat<S: Storage + 'static>(
         latency_ms,
     };
 
-    Ok((StatusCode::OK, Json(ApiResponse::success(chat_response))))
+    Ok((StatusCode::OK, Json(ApiResponse::success(chat_response))).into_response())
+}
+
+/// SSE streaming chat response
+async fn chat_stream_sse<S: Storage + 'static>(
+    router: Arc<Router<S>>,
+    user_id: String,
+    req: ChatRequest,
+) -> Result<Response, ApiError> {
+    // Get streaming receiver from router
+    let receiver = router
+        .handle_message_stream(&user_id, "web", &req.message)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to handle message stream: {}", e);
+            ApiError::InternalError("Failed to process message".to_string())
+        })?;
+
+    // Convert receiver to stream
+    let stream = ReceiverStream::new(receiver);
+
+    // Map stream events to SSE events
+    let sse_stream = stream.map(|event| -> Result<Event, String> {
+        match event {
+            StreamEvent::Delta(text) => Ok(Event::default().data(text)),
+            StreamEvent::ToolStart { name } => Ok(Event::default().event("tool_start").data(name)),
+            StreamEvent::ToolEnd { name, result } => {
+                let data = serde_json::json!({
+                    "name": name,
+                    "result": result
+                });
+                Ok(Event::default().event("tool_end").data(data.to_string()))
+            }
+            StreamEvent::Done { model, usage } => {
+                let data = serde_json::json!({
+                    "model": model,
+                    "usage": usage
+                });
+                Ok(Event::default().event("done").data(data.to_string()))
+            }
+            StreamEvent::Error(msg) => Ok(Event::default().event("error").data(msg)),
+        }
+    });
+
+    Ok(Sse::new(sse_stream).into_response())
 }
 
 // ===== Message Endpoints =====
