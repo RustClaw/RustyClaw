@@ -32,7 +32,7 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         // No users - we are in setup mode
         let mut code_guard = self.setup_code.lock().unwrap();
-        
+
         // If we already have a code, return it
         if let Some(code) = code_guard.as_ref() {
             return Ok(Some(code.clone()));
@@ -44,7 +44,7 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         tracing::warn!("⚠️  INITIAL SETUP REQUIRED ⚠️");
         tracing::warn!("Use this code to create the Admin account: {}", code);
-        
+
         Ok(Some(code))
     }
 
@@ -53,9 +53,10 @@ impl<S: Storage + 'static> PairingManager<S> {
         // 1. Verify code
         {
             let code_guard = self.setup_code.lock().unwrap();
-            let current_code = code_guard.as_ref()
+            let current_code = code_guard
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Setup mode is not active"))?;
-            
+
             if current_code != code {
                 anyhow::bail!("Invalid setup code");
             }

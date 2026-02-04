@@ -265,21 +265,24 @@ impl Storage for SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(|r| Identity {
-            provider: r.get("provider"),
-            provider_id: r.get("provider_id"),
-            user_id: r.get("user_id"),
-            label: r.get("label"),
-            created_at: r.get("created_at"),
-            last_used_at: r.get("last_used_at"),
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| Identity {
+                provider: r.get("provider"),
+                provider_id: r.get("provider_id"),
+                user_id: r.get("user_id"),
+                label: r.get("label"),
+                created_at: r.get("created_at"),
+                last_used_at: r.get("last_used_at"),
+            })
+            .collect())
     }
 
     async fn create_pending_link(&self, code: &str, user_id: &str, provider: &str) -> Result<()> {
         // Expiry in 10 minutes
         let expires_at = chrono::Utc::now() + chrono::Duration::minutes(10);
         sqlx::query(
-            "INSERT INTO pending_links (code, user_id, provider, expires_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO pending_links (code, user_id, provider, expires_at) VALUES (?, ?, ?, ?)",
         )
         .bind(code)
         .bind(user_id)

@@ -15,7 +15,8 @@ pub struct Router<S: Storage> {
 
 impl<S: Storage + 'static> Router<S> {
     pub fn new(config: Config, storage: S, llm_client: LlmClient) -> Self {
-        let session_manager = SessionManager::new(storage.clone(), config.sessions.clone(), llm_client);
+        let session_manager =
+            SessionManager::new(storage.clone(), config.sessions.clone(), llm_client);
         let pairing_manager = PairingManager::new(storage);
 
         Self {
