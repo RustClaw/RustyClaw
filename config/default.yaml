@@ -40,3 +40,10 @@ storage:
 logging:
   level: "info"  # Options: trace, debug, info, warn, error
   format: "pretty"  # Options: pretty, compact, json
+
+api:
+  enabled: true
+  host: "127.0.0.1"
+  port: 18789
+  tokens:
+  - "rustyclaw-test-token-2024"

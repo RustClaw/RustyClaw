@@ -63,5 +63,4 @@ api:
   host: "127.0.0.1"
   port: 18789
   tokens:
-    - "dev-token-rustyclaw-test-2024"
-    - "web-user-dev"
+    - "rustyclaw-test-token-2024"
