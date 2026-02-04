@@ -77,9 +77,7 @@ impl CreateToolRequest {
 
         // Runtime validation
         if !["bash", "python"].contains(&self.runtime.as_str()) {
-            return Err(anyhow!(
-                "Invalid runtime: must be 'bash' or 'python'"
-            ));
+            return Err(anyhow!("Invalid runtime: must be 'bash' or 'python'"));
         }
 
         // Syntax validation based on runtime
