@@ -93,14 +93,20 @@ jobs:
           scp -i ~/.ssh/deploy_key target/release/rustyclaw ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
           ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "chmod +x ${DEPLOY_PATH}/rustyclaw"
 
-      - name: Copy config if not exists
+      - name: Prepare production config with token substitution
+        env:
+          API_TEST_TOKEN: ${{ secrets.API_TEST_TOKEN }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "
-            if [ ! -f ${DEPLOY_PATH}/config/config.yaml ]; then
-              echo 'Config file not found, creating from default'
-            fi
-          "
-          scp -i ~/.ssh/deploy_key config/default.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/config.yaml.example || true
+          mkdir -p /tmp/deploy
+          # Substitute environment variables in production.yaml
+          envsubst < config/production.yaml > /tmp/deploy/config.yaml
+          echo "Config prepared with API token"
+
+      - name: Deploy production config to CT210
+        run: |
+          scp -i ~/.ssh/deploy_key /tmp/deploy/config.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/config.yaml
+          scp -i ~/.ssh/deploy_key config/development.yaml ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/config/development.yaml.example || true
+          echo "Production config deployed with API authentication enabled"
 
       - name: Create systemd service on CT210
         run: |

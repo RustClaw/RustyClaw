@@ -12,11 +12,12 @@
 3. [Base URL & Configuration](#base-url--configuration)
 4. [Error Handling](#error-handling)
 5. [HTTP Endpoints](#http-endpoints)
-6. [WebSocket Connection](#websocket-connection)
-7. [Event Streaming (SSE)](#event-streaming-sse)
-8. [Data Models](#data-models)
-9. [Examples](#examples)
-10. [Rate Limiting & Best Practices](#rate-limiting--best-practices)
+6. [Tool Creation & Management API](#tool-creation--management-api)
+7. [WebSocket Connection](#websocket-connection)
+8. [Event Streaming (SSE)](#event-streaming-sse)
+9. [Data Models](#data-models)
+10. [Examples](#examples)
+11. [Rate Limiting & Best Practices](#rate-limiting--best-practices)
 
 ---
 
@@ -441,6 +442,481 @@ Authorization: Bearer YOUR_TOKEN
   }
 }
 ```
+
+---
+
+## Tool Creation & Management API
+
+### Overview
+
+RustyClaw supports **dynamic tool creation** without requiring restart. Tools (skills) are created via REST API, stored as YAML files, and automatically loaded into the LLM's available tool registry.
+
+### Tool Storage
+
+Tools are stored in:
+```
+~/.rustyclaw/skills/
+└── user-created/
+    ├── my-calculator.yaml
+    ├── weather-checker.yaml
+    └── slack-notifier.yaml
+```
+
+Each tool is a YAML file with:
+- **Frontmatter** (YAML metadata): name, description, parameters, runtime, policy, etc.
+- **Body** (executable code): bash script, Python code, or WASM path
+
+### 12. Create Tool
+
+**Create a new tool/skill that the LLM can use**
+
+```
+POST /api/tools
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "weather-checker",
+  "description": "Check weather for a location using a weather API",
+  "runtime": "bash",
+  "body": "curl -s 'https://wttr.in/${location}?format=3'",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "City name or coordinates"
+      }
+    },
+    "required": ["location"]
+  },
+  "policy": "elevated",
+  "sandbox": false,
+  "network": true,
+  "timeout_secs": 30
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "tool-550e8400-e29b-41d4-a716-446655440000",
+    "name": "weather-checker",
+    "description": "Check weather for a location using a weather API",
+    "created_at": "2026-02-04T10:30:00Z",
+    "path": "~/.rustyclaw/skills/user-created/weather-checker.yaml",
+    "ready": true
+  }
+}
+```
+
+**Parameters:**
+- `name` *(required, string)* - Tool identifier (alphanumeric, hyphens, underscores only), max 100 chars
+- `description` *(required, string)* - Human-readable description, max 500 chars
+- `runtime` *(required, string)* - Execution environment: `bash` or `python`
+- `body` *(required, string)* - Executable code (bash script or Python code)
+- `parameters` *(required, JSON Schema)* - Input parameters definition
+- `policy` *(optional, string)* - Access level: `allow` (default), `deny`, or `elevated`
+- `sandbox` *(optional, boolean)* - Run in Docker sandbox (default: false)
+- `network` *(optional, boolean)* - Allow network access (default: false)
+- `timeout_secs` *(optional, integer)* - Max execution time 1-3600 seconds (default: 30)
+
+---
+
+### 13. List All Tools
+
+**Get all available tools**
+
+```
+GET /api/tools
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "tools": [
+      {
+        "id": "tool-weather-checker",
+        "name": "weather-checker",
+        "description": "Check weather for a location",
+        "runtime": "bash",
+        "source": "user",
+        "policy": "elevated",
+        "created_at": "2026-02-04T10:30:00Z",
+        "ready": true
+      },
+      {
+        "id": "tool-calculator",
+        "name": "calculator",
+        "description": "Perform math calculations",
+        "runtime": "python",
+        "source": "user",
+        "policy": "allow",
+        "created_at": "2026-02-04T11:15:00Z",
+        "ready": true
+      }
+    ],
+    "total": 2,
+    "ready": 2,
+    "failed": 0
+  }
+}
+```
+
+---
+
+### 14. Get Tool Details
+
+**Retrieve specific tool configuration**
+
+```
+GET /api/tools/:name
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "tool-weather-checker",
+    "name": "weather-checker",
+    "description": "Check weather for a location",
+    "runtime": "bash",
+    "body": "curl -s 'https://wttr.in/${location}?format=3'",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "City name or coordinates"
+        }
+      },
+      "required": ["location"]
+    },
+    "policy": "elevated",
+    "sandbox": false,
+    "network": true,
+    "timeout_secs": 30,
+    "path": "~/.rustyclaw/skills/user-created/weather-checker.yaml",
+    "ready": true
+  }
+}
+```
+
+---
+
+### 15. Update Tool
+
+**Modify an existing tool**
+
+```
+PUT /api/tools/:name
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+```
+
+**Request Body:** (same as create_tool)
+
+**Response:** Updated tool object (same as get_tool)
+
+---
+
+### 16. Delete Tool
+
+**Remove a tool**
+
+```
+DELETE /api/tools/:name
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "message": "Tool 'weather-checker' deleted successfully",
+    "path": "~/.rustyclaw/skills/user-created/weather-checker.yaml"
+  }
+}
+```
+
+---
+
+### 17. Test Tool
+
+**Execute a tool with test parameters**
+
+```
+POST /api/tools/:name/test
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "parameters": {
+    "location": "San Francisco"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "status": "success",
+    "output": "San Francisco: +5°C, Sunny",
+    "execution_time_ms": 245,
+    "error": null
+  }
+}
+```
+
+---
+
+### 18. Validate Tool
+
+**Check tool syntax and configuration without executing**
+
+```
+POST /api/tools/:name/validate
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "valid": true,
+    "name": "weather-checker",
+    "runtime": "bash",
+    "errors": [],
+    "warnings": []
+  }
+}
+```
+
+---
+
+### 19. Get Tool Definition (For LLM)
+
+**Get tool in OpenAI function definition format**
+
+```
+GET /api/tools/:name/definition
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "type": "function",
+    "function": {
+      "name": "weather-checker",
+      "description": "Check weather for a location",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "City name or coordinates"
+          }
+        },
+        "required": ["location"]
+      }
+    }
+  }
+}
+```
+
+---
+
+### 20. Get All Tool Definitions
+
+**Get all available tools in OpenAI format (for LLM integration)**
+
+```
+GET /api/tools/definitions/all
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "type": "function",
+      "function": {
+        "name": "weather-checker",
+        "description": "Check weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "City name"
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "Perform math calculations",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Math expression"
+            }
+          },
+          "required": ["expression"]
+        }
+      }
+    }
+  ]
+}
+```
+
+---
+
+### Tool File Format (YAML)
+
+Tools are stored as YAML files with frontmatter:
+
+**File: `~/.rustyclaw/skills/user-created/weather-checker.yaml`**
+
+```yaml
+---
+name: weather-checker
+description: Check weather for a location using a weather API
+runtime: bash
+parameters:
+  type: object
+  properties:
+    location:
+      type: string
+      description: City name or coordinates
+  required:
+    - location
+policy: elevated
+sandbox: false
+network: true
+timeout_secs: 30
+---
+curl -s "https://wttr.in/${location}?format=3"
+```
+
+---
+
+### Tool Creation Examples
+
+#### Example 1: Create a Calculator Tool
+
+```bash
+curl -X POST http://localhost:18789/api/tools \
+  -H "Authorization: Bearer dev-token-123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "calculator",
+    "description": "Perform arithmetic calculations",
+    "runtime": "python",
+    "body": "import sys; print(eval(sys.argv[1]))",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string",
+          "description": "Math expression (e.g., 2+2, 10*5)"
+        }
+      },
+      "required": ["expression"]
+    },
+    "policy": "allow",
+    "sandbox": true,
+    "timeout_secs": 5
+  }'
+```
+
+#### Example 2: Create a Slack Notifier
+
+```bash
+curl -X POST http://localhost:18789/api/tools \
+  -H "Authorization: Bearer dev-token-123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "slack-notifier",
+    "description": "Send messages to Slack channels",
+    "runtime": "bash",
+    "body": "curl -X POST ${SLACK_WEBHOOK} -d \"{\\\"text\\\":\\\"${message}\\\"}\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "Message to send"
+        }
+      },
+      "required": ["message"]
+    },
+    "policy": "elevated",
+    "network": true,
+    "timeout_secs": 10
+  }'
+```
+
+#### Example 3: List Tools
+
+```bash
+curl http://localhost:18789/api/tools \
+  -H "Authorization: Bearer dev-token-123"
+```
+
+#### Example 4: Test a Tool
+
+```bash
+curl -X POST http://localhost:18789/api/tools/calculator/test \
+  -H "Authorization: Bearer dev-token-123" \
+  -H "Content-Type: application/json" \
+  -d '{"parameters": {"expression": "2+2"}}'
+```
+
+#### Example 5: Get All Definitions for LLM
+
+```bash
+curl http://localhost:18789/api/tools/definitions/all \
+  -H "Authorization: Bearer dev-token-123"
+```
+
+---
+
+### Tool Policies Explained
+
+| Policy | Description | Use Case |
+|--------|-------------|----------|
+| `allow` | Tool can be called without restriction | Safe tools (calculations, data retrieval) |
+| `deny` | Tool cannot be called by LLM | Disabled/deprecated tools |
+| `elevated` | Requires explicit user permission | Dangerous tools (exec, file writes, network) |
 
 ---
 

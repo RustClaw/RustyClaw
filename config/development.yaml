@@ -1,0 +1,67 @@
+gateway:
+  host: "127.0.0.1"
+  port: 7860
+  log_level: "debug"
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+  models:
+    primary: "qwen2.5:7b"
+    code: "deepseek-coder-v2:16b"
+    fast: "qwen2.5:1.5b"
+  keep_alive: "5m"
+  cache:
+    type: "ram"
+    max_models: 3
+    eviction: "lru"
+
+channels:
+  telegram:
+    enabled: false
+  discord:
+    enabled: false
+  whatsapp:
+    enabled: false
+
+sessions:
+  scope: "per-sender"
+  max_tokens: 128000
+  channel_routing: "isolated"
+
+storage:
+  storage_type: "sqlite"
+  path: "~/.rustyclaw/data.db"
+
+logging:
+  level: "debug"
+  format: "pretty"
+
+sandbox:
+  mode: "off"
+  scope: "session"
+  image: "ubuntu:22.04"
+  workspace: "none"
+  network: false
+
+tools:
+  policies:
+    exec: "elevated"
+    bash: "elevated"
+    python: "elevated"
+    web_fetch: "allow"
+    web_search: "allow"
+    read_file: "allow"
+    write_file: "elevated"
+  skills_dir: "~/.rustyclaw/skills"
+  skills_enabled: true
+  user_tools_dir: "~/.rustyclaw/skills/user-created"
+  creation_enabled: true
+
+api:
+  enabled: true
+  host: "127.0.0.1"
+  port: 18789
+  tokens:
+    - "dev-token-rustyclaw-test-2024"
+    - "web-user-dev"

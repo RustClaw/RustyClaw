@@ -11,7 +11,7 @@ pub struct CreateToolRequest {
     pub name: String,
     /// Human-readable description
     pub description: String,
-    /// Runtime: bash, python, or wasm
+    /// Runtime: bash or python
     pub runtime: String,
     /// Executable body (script code)
     pub body: String,
@@ -76,9 +76,9 @@ impl CreateToolRequest {
         }
 
         // Runtime validation
-        if !["bash", "python", "wasm"].contains(&self.runtime.as_str()) {
+        if !["bash", "python"].contains(&self.runtime.as_str()) {
             return Err(anyhow!(
-                "Invalid runtime: must be 'bash', 'python', or 'wasm'"
+                "Invalid runtime: must be 'bash' or 'python'"
             ));
         }
 
@@ -86,7 +86,6 @@ impl CreateToolRequest {
         match self.runtime.as_str() {
             "bash" => validate_bash_syntax(&self.body)?,
             "python" => validate_python_syntax(&self.body)?,
-            "wasm" => validate_wasm_syntax(&self.body)?,
             _ => {}
         }
 
@@ -168,18 +167,6 @@ fn validate_python_syntax(body: &str) -> Result<()> {
 
     // Could use Python AST parser for deeper validation
     // For now, just ensure basic structure
-    Ok(())
-}
-
-fn validate_wasm_syntax(body: &str) -> Result<()> {
-    // WASM validation: body should be path to .wasm file or reference
-    if !body.starts_with("~/")
-        && !body.starts_with("/")
-        && !body.contains(".wasm")
-        && !body.starts_with("http")
-    {
-        return Err(anyhow!("WASM body must be a path or URL to .wasm file"));
-    }
     Ok(())
 }
 

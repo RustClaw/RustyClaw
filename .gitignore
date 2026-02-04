@@ -11,13 +11,15 @@ Cargo.lock
 # Architecture/planning docs (keep local only)
 rustyclaw.md
 /docs
-.md
+*.md
+
 # Development tools
 .claude/
 
 # Environment secrets
 secrets.env
 .env
+.env.local
 
 # IDE
 .vscode/

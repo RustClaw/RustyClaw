@@ -1,0 +1,81 @@
+gateway:
+  host: "192.168.15.9"
+  port: 7860
+  log_level: "info"
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+  models:
+    primary: "qwen2.5:32b"
+    code: "deepseek-coder-v2:16b"
+    fast: "qwen2.5:7b"
+  keep_alive: "5m"
+  cache:
+    type: "ram"
+    max_models: 3
+    eviction: "lru"
+  routing:
+    default: "qwen2.5:32b"
+    rules:
+      - pattern: "(code|function|implement|debug)"
+        model: "deepseek-coder-v2:16b"
+      - pattern: "(quick|fast|simple)"
+        model: "qwen2.5:7b"
+
+channels:
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}"
+  discord:
+    enabled: false
+    token: "${DISCORD_BOT_TOKEN}"
+  whatsapp:
+    enabled: false
+    phone_number: ""
+
+sessions:
+  scope: "per-sender"
+  max_tokens: 128000
+  channel_routing: "isolated"
+
+storage:
+  storage_type: "sqlite"
+  path: "~/.rustyclaw/data.db"
+
+logging:
+  level: "info"
+  format: "pretty"
+
+sandbox:
+  mode: "non-main"
+  scope: "session"
+  image: "ubuntu:22.04"
+  workspace: "none"
+  network: false
+
+tools:
+  policies:
+    exec: "elevated"
+    bash: "elevated"
+    python: "elevated"
+    send_whatsapp: "allow"
+    list_whatsapp_groups: "allow"
+    list_whatsapp_accounts: "allow"
+    web_fetch: "elevated"
+    web_search: "elevated"
+    read_file: "elevated"
+    write_file: "elevated"
+    list_files: "elevated"
+  skills_dir: "~/.rustyclaw/skills"
+  skills_enabled: true
+  user_tools_dir: "~/.rustyclaw/skills/user-created"
+  creation_enabled: true
+
+api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 18789
+  tokens:
+    - "${API_TEST_TOKEN}"
+    - "web-user-admin"
