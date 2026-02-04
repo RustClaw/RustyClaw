@@ -48,7 +48,7 @@ logging:
   format: "pretty"
 
 sandbox:
-  mode: "non-main"
+  mode: "non_main"
   scope: "session"
   image: "ubuntu:22.04"
   workspace: "none"

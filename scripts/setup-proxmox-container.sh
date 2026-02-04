@@ -53,7 +53,20 @@ apt-get install -y \
     pkg-config \
     libssl-dev \
     sqlite3 \
-    jq
+    jq \
+    ca-certificates \
+    gnupg
+
+echo "Installing Docker..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 echo "Installing Rust..."
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -70,7 +83,7 @@ CONTAINER_SETUP
 echo "Note: You may need to run this manually in Proxmox or via pveam/lxc commands:"
 echo ""
 echo "pveam download local debian-12-standard_12.2-1_amd64.tar.zst"
-echo "pct create $CONTAINER_ID local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst --hostname $CONTAINER_NAME --cores 4 --memory 2048 --swap 512 --net0 name=eth0,bridge=vmbr0,ip=dhcp"
+echo "pct create $CONTAINER_ID local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst --hostname $CONTAINER_NAME --cores 4 --memory 4096 --swap 1024 --rootfs SSD480GB:20 --net0 name=eth0,bridge=vmbr0,ip=192.168.15.9/24,gw=192.168.15.1 -features nesting=1"
 echo ""
 echo "Then run the setup inside the container:"
 echo "pct exec $CONTAINER_ID /bin/bash /tmp/container_setup.sh"
@@ -146,7 +159,7 @@ mkdir -p ~/rustyclaw-alpha/config
 # Create default config
 cat > ~/rustyclaw-alpha/config/config.yaml << 'CONFIG'
 gateway:
-  host: "127.0.0.1"
+  host: "0.0.0.0"
   port: 18789
   log_level: "info"
 
@@ -179,6 +192,9 @@ storage:
 logging:
   level: "info"
   format: "pretty"
+
+sandbox:
+  mode: "non_main"
 CONFIG
 
 echo "Deployment directories created!"
