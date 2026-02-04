@@ -650,6 +650,55 @@ mod tests {
             messages.retain(|m| m.session_id != session_id);
             Ok(())
         }
+
+        // Identity mock implementation
+        async fn get_user(&self, _id: &str) -> Result<Option<crate::storage::User>> {
+            Ok(None)
+        }
+        async fn get_user_by_username(
+            &self,
+            _username: &str,
+        ) -> Result<Option<crate::storage::User>> {
+            Ok(None)
+        }
+        async fn create_user(&self, _user: crate::storage::User) -> Result<()> {
+            Ok(())
+        }
+        async fn user_count(&self) -> Result<usize> {
+            Ok(0)
+        }
+
+        async fn get_identity(
+            &self,
+            _provider: &str,
+            _provider_id: &str,
+        ) -> Result<Option<crate::storage::Identity>> {
+            Ok(None)
+        }
+        async fn create_identity(&self, _identity: crate::storage::Identity) -> Result<()> {
+            Ok(())
+        }
+        async fn list_identities(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<crate::storage::Identity>> {
+            Ok(vec![])
+        }
+
+        async fn create_pending_link(
+            &self,
+            _code: &str,
+            _user_id: &str,
+            _provider: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+        async fn get_pending_link(&self, _code: &str) -> Result<Option<(String, String)>> {
+            Ok(None)
+        }
+        async fn delete_pending_link(&self, _code: &str) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[test]

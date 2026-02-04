@@ -1,6 +1,7 @@
 use crate::storage::{Storage, User};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
+use qr2term::print_qr;
 use rand::Rng;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -32,7 +33,7 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         // No users - we are in setup mode
         let mut code_guard = self.setup_code.lock().unwrap();
-
+        
         // If we already have a code, return it
         if let Some(code) = code_guard.as_ref() {
             return Ok(Some(code.clone()));
@@ -44,10 +45,18 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         tracing::warn!("⚠️  INITIAL SETUP REQUIRED ⚠️");
         tracing::warn!("Use this code to create the Admin account: {}", code);
-
+        
+        // Print QR code for mobile apps
+        // Format: rustyclaw://setup?code=XXXX
+        // Note: In real world, we need IP/Host here. For now, just the code scheme.
+        // The app will need to discover the IP via mDNS or user input.
+        let setup_url = format!("rustyclaw://setup?code={}", code);
+        println!("\nScan this QR code with the RustyClaw App to setup:");
+        print_qr(&setup_url).ok();
+        println!();
+        
         Ok(Some(code))
     }
-
     /// Attempt to claim admin status using the setup code
     pub async fn claim_admin(&self, code: &str, username: &str) -> Result<User> {
         // 1. Verify code
