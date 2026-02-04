@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex};
 struct InMemoryStorage {
     sessions: Arc<Mutex<Vec<Session>>>,
     messages: Arc<Mutex<Vec<Message>>>,
+    users: Arc<Mutex<Vec<rustyclaw::storage::User>>>,
+    identities: Arc<Mutex<Vec<rustyclaw::storage::Identity>>>,
+    pending_links: Arc<Mutex<Vec<(String, String, String, chrono::DateTime<chrono::Utc>)>>>,
 }
 
 impl InMemoryStorage {
@@ -20,6 +23,9 @@ impl InMemoryStorage {
         Self {
             sessions: Arc::new(Mutex::new(Vec::new())),
             messages: Arc::new(Mutex::new(Vec::new())),
+            users: Arc::new(Mutex::new(Vec::new())),
+            identities: Arc::new(Mutex::new(Vec::new())),
+            pending_links: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -82,6 +88,82 @@ impl Storage for InMemoryStorage {
     async fn delete_session_messages(&self, session_id: &str) -> Result<()> {
         let mut messages = self.messages.lock().unwrap();
         messages.retain(|m| m.session_id != session_id);
+        Ok(())
+    }
+
+    // Identity implementation
+    async fn get_user(&self, id: &str) -> Result<Option<rustyclaw::storage::User>> {
+        let users = self.users.lock().unwrap();
+        Ok(users.iter().find(|u| u.id == id).cloned())
+    }
+
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<rustyclaw::storage::User>> {
+        let users = self.users.lock().unwrap();
+        Ok(users.iter().find(|u| u.username == username).cloned())
+    }
+
+    async fn create_user(&self, user: rustyclaw::storage::User) -> Result<()> {
+        let mut users = self.users.lock().unwrap();
+        users.push(user);
+        Ok(())
+    }
+
+    async fn user_count(&self) -> Result<usize> {
+        let users = self.users.lock().unwrap();
+        Ok(users.len())
+    }
+
+    async fn get_identity(
+        &self,
+        provider: &str,
+        provider_id: &str,
+    ) -> Result<Option<rustyclaw::storage::Identity>> {
+        let identities = self.identities.lock().unwrap();
+        Ok(identities
+            .iter()
+            .find(|i| i.provider == provider && i.provider_id == provider_id)
+            .cloned())
+    }
+
+    async fn create_identity(&self, identity: rustyclaw::storage::Identity) -> Result<()> {
+        let mut identities = self.identities.lock().unwrap();
+        identities.push(identity);
+        Ok(())
+    }
+
+    async fn list_identities(&self, user_id: &str) -> Result<Vec<rustyclaw::storage::Identity>> {
+        let identities = self.identities.lock().unwrap();
+        Ok(identities
+            .iter()
+            .filter(|i| i.user_id == user_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn create_pending_link(&self, code: &str, user_id: &str, provider: &str) -> Result<()> {
+        let mut pending = self.pending_links.lock().unwrap();
+        let expires_at = chrono::Utc::now() + chrono::Duration::minutes(10);
+        pending.push((
+            code.to_string(),
+            user_id.to_string(),
+            provider.to_string(),
+            expires_at,
+        ));
+        Ok(())
+    }
+
+    async fn get_pending_link(&self, code: &str) -> Result<Option<(String, String)>> {
+        let pending = self.pending_links.lock().unwrap();
+        let now = chrono::Utc::now();
+        Ok(pending
+            .iter()
+            .find(|(c, _, _, e)| c == code && *e > now)
+            .map(|(_, u, p, _)| (u.clone(), p.clone())))
+    }
+
+    async fn delete_pending_link(&self, code: &str) -> Result<()> {
+        let mut pending = self.pending_links.lock().unwrap();
+        pending.retain(|(c, _, _, _)| c != code);
         Ok(())
     }
 }
