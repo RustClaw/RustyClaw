@@ -5,7 +5,7 @@ gateway:
 
 llm:
   provider: "ollama"
-  base_url: "http://localhost:11434/v1"
+  base_url: "http://192.168.15.14:11434/v1"
   models:
     primary: "qwen2.5:32b"
     code: "deepseek-coder-v2:16b"
