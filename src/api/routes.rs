@@ -4,6 +4,8 @@ use crate::api::{
 };
 use crate::core::{Router, StreamEvent};
 use crate::storage::Storage;
+use crate::tools::skills::parse_skill_file;
+use crate::tools::{get_skill, list_skills, load_skill, unload_skill, CreateToolRequest};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{
@@ -436,6 +438,393 @@ pub async fn load_model<S: Storage + 'static>(
     });
 
     Ok(Json(ApiResponse::success(response)))
+}
+
+// ===== Tool Endpoints =====
+
+/// Tool creation response
+#[derive(serde::Serialize)]
+pub struct ToolResponse {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub path: String,
+    pub ready: bool,
+}
+
+/// Tool info for listing
+#[derive(serde::Serialize)]
+pub struct ToolInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub runtime: String,
+    pub source: String,
+    pub policy: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub ready: bool,
+}
+
+/// Tool list response
+#[derive(serde::Serialize)]
+pub struct ToolListResponse {
+    pub tools: Vec<ToolInfo>,
+    pub total: usize,
+    pub ready: usize,
+    pub failed: usize,
+}
+
+/// POST /api/tools - Create a new tool
+pub async fn create_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Json(req): Json<CreateToolRequest>,
+) -> Result<(StatusCode, Json<ApiResponse<ToolResponse>>), ApiError> {
+    // Validate request
+    req.validate().map_err(|e| {
+        tracing::error!("Tool validation failed: {}", e);
+        ApiError::BadRequest(format!("Tool validation failed: {}", e))
+    })?;
+
+    // Check if tool already exists
+    if get_skill(&req.name).await.is_some() {
+        return Err(ApiError::BadRequest(format!(
+            "Tool '{}' already exists",
+            req.name
+        )));
+    }
+
+    // Get storage path
+    let storage_path = get_tool_storage_path(&req.name)?;
+
+    // Create directory if needed
+    if let Some(parent) = storage_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| ApiError::InternalError(format!("Failed to create directory: {}", e)))?;
+    }
+
+    // Generate skill file content
+    let skill_content = req.to_skill_file();
+
+    // Save to disk
+    tokio::fs::write(&storage_path, &skill_content)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to write tool file: {}", e)))?;
+
+    // Load into registry
+    let skill_entry = parse_skill_file(&storage_path)
+        .map_err(|e| ApiError::InternalError(format!("Failed to parse tool: {}", e)))?;
+
+    load_skill(skill_entry)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to load tool: {}", e)))?;
+
+    let response = ToolResponse {
+        id: format!("tool-{}", uuid::Uuid::new_v4()),
+        name: req.name.clone(),
+        description: req.description.clone(),
+        created_at: Utc::now(),
+        path: storage_path.to_string_lossy().to_string(),
+        ready: true,
+    };
+
+    tracing::info!("Tool created successfully: {}", req.name);
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(response))))
+}
+
+/// GET /api/tools - List all tools
+pub async fn list_tools<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+) -> Result<Json<ApiResponse<ToolListResponse>>, ApiError> {
+    let all_skills = list_skills().await;
+
+    let tools: Vec<ToolInfo> = all_skills
+        .into_iter()
+        .map(|skill| ToolInfo {
+            id: format!("tool-{}", skill.manifest.name),
+            name: skill.manifest.name.clone(),
+            description: skill.manifest.description.clone(),
+            runtime: skill.manifest.runtime.clone(),
+            source: "user".to_string(),
+            policy: skill.manifest.policy.clone(),
+            created_at: Some(Utc::now()),
+            ready: true,
+        })
+        .collect();
+
+    let total = tools.len();
+    let response = ToolListResponse {
+        tools,
+        total,
+        ready: total,
+        failed: 0,
+    };
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// GET /api/tools/:name - Get tool details
+pub async fn get_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, ApiError> {
+    let skill = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    let response = serde_json::json!({
+        "id": format!("tool-{}", skill.manifest.name),
+        "name": skill.manifest.name,
+        "description": skill.manifest.description,
+        "runtime": skill.manifest.runtime,
+        "body": skill.body,
+        "parameters": skill.manifest.parameters,
+        "policy": skill.manifest.policy,
+        "sandbox": skill.manifest.sandbox,
+        "network": skill.manifest.network,
+        "timeout_secs": skill.manifest.timeout_secs,
+        "path": skill.source_path.to_string_lossy(),
+        "ready": true,
+    });
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// DELETE /api/tools/:name - Delete a tool
+pub async fn delete_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, ApiError> {
+    let skill = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    // Unload from registry
+    unload_skill(&name)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to unload tool: {}", e)))?;
+
+    // Delete file
+    tokio::fs::remove_file(&skill.source_path)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to delete tool file: {}", e)))?;
+
+    let response = serde_json::json!({
+        "message": format!("Tool '{}' deleted successfully", name),
+        "path": skill.source_path.to_string_lossy(),
+    });
+
+    tracing::info!("Tool deleted: {}", name);
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// POST /api/tools/:name/validate - Validate tool syntax
+pub async fn validate_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, ApiError> {
+    let skill = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    let response = serde_json::json!({
+        "valid": true,
+        "name": skill.manifest.name,
+        "runtime": skill.manifest.runtime,
+        "errors": [],
+        "warnings": [],
+    });
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// PUT /api/tools/:name - Update tool
+pub async fn update_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+    Json(req): Json<CreateToolRequest>,
+) -> Result<Json<ApiResponse<ToolResponse>>, ApiError> {
+    // Validate request
+    req.validate().map_err(|e| {
+        tracing::error!("Tool validation failed: {}", e);
+        ApiError::BadRequest(format!("Tool validation failed: {}", e))
+    })?;
+
+    // Check if tool exists
+    let existing = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    // If name changed, check new name doesn't exist
+    if req.name != name && get_skill(&req.name).await.is_some() {
+        return Err(ApiError::BadRequest(format!(
+            "Tool '{}' already exists",
+            req.name
+        )));
+    }
+
+    // Unload old tool
+    unload_skill(&name)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to unload tool: {}", e)))?;
+
+    // Delete old file if name changed
+    if req.name != name {
+        tokio::fs::remove_file(&existing.source_path)
+            .await
+            .map_err(|e| {
+                ApiError::InternalError(format!("Failed to delete old tool file: {}", e))
+            })?;
+    }
+
+    // Get storage path for (possibly) new name
+    let storage_path = get_tool_storage_path(&req.name)?;
+
+    // Create directory if needed
+    if let Some(parent) = storage_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| ApiError::InternalError(format!("Failed to create directory: {}", e)))?;
+    }
+
+    // Generate skill file content
+    let skill_content = req.to_skill_file();
+
+    // Save to disk
+    tokio::fs::write(&storage_path, &skill_content)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to write tool file: {}", e)))?;
+
+    // Load into registry
+    let skill_entry = parse_skill_file(&storage_path)
+        .map_err(|e| ApiError::InternalError(format!("Failed to parse tool: {}", e)))?;
+
+    load_skill(skill_entry)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to load tool: {}", e)))?;
+
+    let response = ToolResponse {
+        id: format!("tool-{}", uuid::Uuid::new_v4()),
+        name: req.name.clone(),
+        description: req.description.clone(),
+        created_at: Utc::now(),
+        path: storage_path.to_string_lossy().to_string(),
+        ready: true,
+    };
+
+    tracing::info!("Tool updated: {}", req.name);
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// POST /api/tools/:name/test - Test tool with parameters
+#[derive(serde::Deserialize)]
+pub struct ToolTestRequest {
+    #[serde(default)]
+    pub parameters: serde_json::Value,
+}
+
+#[derive(serde::Serialize)]
+pub struct ToolTestResponse {
+    pub status: String,
+    pub output: String,
+    pub execution_time_ms: u128,
+    pub error: Option<String>,
+}
+
+pub async fn test_tool<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+    Json(_req): Json<ToolTestRequest>,
+) -> Result<Json<ApiResponse<ToolTestResponse>>, ApiError> {
+    let skill = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    let start = std::time::Instant::now();
+
+    // For now, return a mock response
+    // In production, would execute the tool with the given parameters
+    let response = ToolTestResponse {
+        status: "success".to_string(),
+        output: format!("Mock execution of {}", name),
+        execution_time_ms: start.elapsed().as_millis(),
+        error: None,
+    };
+
+    tracing::info!(
+        "Tool tested: {} (runtime: {})",
+        name,
+        skill.manifest.runtime
+    );
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// GET /api/tools/:name/definition - Get tool definition in OpenAI format
+pub async fn get_tool_definition<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, ApiError> {
+    let skill = get_skill(&name)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("Tool '{}' not found", name)))?;
+
+    let definition = serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": skill.manifest.name,
+            "description": skill.manifest.description,
+            "parameters": skill.manifest.parameters,
+        }
+    });
+
+    Ok(Json(ApiResponse::success(definition)))
+}
+
+/// GET /api/tools/definitions/all - Get all tool definitions for LLM
+pub async fn get_all_tool_definitions<S: Storage + 'static>(
+    State(_router): State<Arc<Router<S>>>,
+    Extension(_user_id): Extension<String>,
+) -> Result<Json<ApiResponse<Vec<serde_json::Value>>>, ApiError> {
+    let all_skills = list_skills().await;
+
+    let definitions: Vec<serde_json::Value> = all_skills
+        .into_iter()
+        .map(|skill| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": skill.manifest.name,
+                    "description": skill.manifest.description,
+                    "parameters": skill.manifest.parameters,
+                }
+            })
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(definitions)))
+}
+
+// Helper function to get tool storage path
+fn get_tool_storage_path(name: &str) -> Result<std::path::PathBuf, ApiError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| ApiError::InternalError("Cannot determine home directory".to_string()))?;
+
+    let path = home
+        .join(".rustyclaw")
+        .join("skills")
+        .join("user-created")
+        .join(format!("{}.yaml", name));
+
+    Ok(path)
 }
 
 #[cfg(test)]

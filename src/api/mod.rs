@@ -9,7 +9,7 @@ use crate::storage::Storage;
 use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router as AxumRouter};
 use std::sync::Arc;
 use tracing::info;
@@ -108,6 +108,40 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             .route(
                 &format!("{}/models/:name/load", self.api_path),
                 post(routes::load_model),
+            )
+            // Tool endpoints
+            .route(
+                &format!("{}/tools", self.api_path),
+                post(routes::create_tool),
+            )
+            .route(&format!("{}/tools", self.api_path), get(routes::list_tools))
+            .route(
+                &format!("{}/tools/:name", self.api_path),
+                get(routes::get_tool),
+            )
+            .route(
+                &format!("{}/tools/:name", self.api_path),
+                put(routes::update_tool),
+            )
+            .route(
+                &format!("{}/tools/:name", self.api_path),
+                delete(routes::delete_tool),
+            )
+            .route(
+                &format!("{}/tools/:name/test", self.api_path),
+                post(routes::test_tool),
+            )
+            .route(
+                &format!("{}/tools/:name/validate", self.api_path),
+                post(routes::validate_tool),
+            )
+            .route(
+                &format!("{}/tools/:name/definition", self.api_path),
+                get(routes::get_tool_definition),
+            )
+            .route(
+                &format!("{}/tools/definitions/all", self.api_path),
+                get(routes::get_all_tool_definitions),
             )
             .with_state(self.router.clone())
             .layer(axum::middleware::from_fn_with_state(

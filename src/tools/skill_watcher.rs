@@ -44,7 +44,7 @@ impl SkillWatcher {
 
         debouncer
             .watcher()
-            .watch(&self.skills_dir, notify::RecursiveMode::NonRecursive)
+            .watch(&self.skills_dir, notify::RecursiveMode::Recursive)
             .context("Failed to watch skills directory")?;
 
         info!(
@@ -61,7 +61,7 @@ impl SkillWatcher {
                         if path_buf
                             .extension()
                             .and_then(|s| s.to_str())
-                            .map(|s| s == "md")
+                            .map(|s| s == "yaml" || s == "yml")
                             .unwrap_or(false)
                         {
                             // The debouncer gives us an underlying EventKind through event.kind
@@ -95,7 +95,8 @@ impl SkillWatcher {
             Ok(entries) => {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                    let ext = path.extension().and_then(|s| s.to_str());
+                    if ext == Some("yaml") || ext == Some("yml") {
                         match super::skills::parse_skill_file(&path) {
                             Ok(entry) => match super::skills::load_skill(entry).await {
                                 Ok(_) => {
@@ -203,8 +204,8 @@ runtime: bash
 echo "test 2"
 "#;
 
-        fs::write(skills_path.join("skill1.md"), skill1_content).unwrap();
-        fs::write(skills_path.join("skill2.md"), skill2_content).unwrap();
+        fs::write(skills_path.join("skill1.yaml"), skill1_content).unwrap();
+        fs::write(skills_path.join("skill2.yaml"), skill2_content).unwrap();
 
         // Create watcher and run initial scan
         let watcher = SkillWatcher::new(skills_path.to_str().unwrap());

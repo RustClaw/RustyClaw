@@ -391,6 +391,12 @@ pub struct ToolsConfig {
     /// Enable the skill watcher (default: true)
     #[serde(default = "default_skills_enabled")]
     pub skills_enabled: bool,
+    /// Directory for user-created tools (default: ~/.rustyclaw/skills/user-created)
+    #[serde(default = "default_user_tools_dir")]
+    pub user_tools_dir: String,
+    /// Enable tool creation via API (default: true)
+    #[serde(default = "default_tool_creation_enabled")]
+    pub creation_enabled: bool,
 }
 
 impl Default for ToolsConfig {
@@ -411,6 +417,8 @@ impl Default for ToolsConfig {
             ]),
             skills_dir: default_skills_dir(),
             skills_enabled: default_skills_enabled(),
+            user_tools_dir: default_user_tools_dir(),
+            creation_enabled: default_tool_creation_enabled(),
         }
     }
 }
@@ -427,5 +435,21 @@ fn default_skills_dir() -> String {
 }
 
 fn default_skills_enabled() -> bool {
+    true
+}
+
+fn default_user_tools_dir() -> String {
+    dirs::home_dir()
+        .map(|h: std::path::PathBuf| {
+            h.join(".rustyclaw")
+                .join("skills")
+                .join("user-created")
+                .to_string_lossy()
+                .to_string()
+        })
+        .unwrap_or_else(|| "./.rustyclaw/skills/user-created".to_string())
+}
+
+fn default_tool_creation_enabled() -> bool {
     true
 }
