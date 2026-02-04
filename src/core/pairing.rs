@@ -33,7 +33,7 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         // No users - we are in setup mode
         let mut code_guard = self.setup_code.lock().unwrap();
-        
+
         // If we already have a code, return it
         if let Some(code) = code_guard.as_ref() {
             return Ok(Some(code.clone()));
@@ -45,7 +45,7 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         tracing::warn!("⚠️  INITIAL SETUP REQUIRED ⚠️");
         tracing::warn!("Use this code to create the Admin account: {}", code);
-        
+
         // Print QR code for mobile apps
         // Format: rustyclaw://setup?code=XXXX
         // Note: In real world, we need IP/Host here. For now, just the code scheme.
@@ -54,7 +54,7 @@ impl<S: Storage + 'static> PairingManager<S> {
         println!("\nScan this QR code with the RustyClaw App to setup:");
         print_qr(&setup_url).ok();
         println!();
-        
+
         Ok(Some(code))
     }
     /// Attempt to claim admin status using the setup code

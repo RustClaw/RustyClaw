@@ -678,10 +678,7 @@ mod tests {
         async fn create_identity(&self, _identity: crate::storage::Identity) -> Result<()> {
             Ok(())
         }
-        async fn list_identities(
-            &self,
-            _user_id: &str,
-        ) -> Result<Vec<crate::storage::Identity>> {
+        async fn list_identities(&self, _user_id: &str) -> Result<Vec<crate::storage::Identity>> {
             Ok(vec![])
         }
 
