@@ -1,4 +1,4 @@
-use super::{Message, Session, Storage};
+use super::{Identity, Message, Session, Storage, User};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use sqlx::{sqlite::SqlitePool, Row};
@@ -164,6 +164,148 @@ impl Storage for SqliteStorage {
             .execute(&self.pool)
             .await?;
 
+        Ok(())
+    }
+
+    // Identity implementation
+    async fn get_user(&self, id: &str) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| User {
+            id: r.get("id"),
+            username: r.get("username"),
+            role: r.get("role"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        }))
+    }
+
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT id, username, role, created_at, updated_at FROM users WHERE username = ?",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| User {
+            id: r.get("id"),
+            username: r.get("username"),
+            role: r.get("role"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        }))
+    }
+
+    async fn create_user(&self, user: User) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO users (id, username, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(user.id)
+        .bind(user.username)
+        .bind(user.role)
+        .bind(user.created_at)
+        .bind(user.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn user_count(&self) -> Result<usize> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.0 as usize)
+    }
+
+    async fn get_identity(&self, provider: &str, provider_id: &str) -> Result<Option<Identity>> {
+        let row = sqlx::query(
+            "SELECT provider, provider_id, user_id, label, created_at, last_used_at FROM identities WHERE provider = ? AND provider_id = ?"
+        )
+        .bind(provider)
+        .bind(provider_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| Identity {
+            provider: r.get("provider"),
+            provider_id: r.get("provider_id"),
+            user_id: r.get("user_id"),
+            label: r.get("label"),
+            created_at: r.get("created_at"),
+            last_used_at: r.get("last_used_at"),
+        }))
+    }
+
+    async fn create_identity(&self, identity: Identity) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO identities (provider, provider_id, user_id, label, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .bind(identity.provider)
+        .bind(identity.provider_id)
+        .bind(identity.user_id)
+        .bind(identity.label)
+        .bind(identity.created_at)
+        .bind(identity.last_used_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_identities(&self, user_id: &str) -> Result<Vec<Identity>> {
+        let rows = sqlx::query(
+            "SELECT provider, provider_id, user_id, label, created_at, last_used_at FROM identities WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| Identity {
+            provider: r.get("provider"),
+            provider_id: r.get("provider_id"),
+            user_id: r.get("user_id"),
+            label: r.get("label"),
+            created_at: r.get("created_at"),
+            last_used_at: r.get("last_used_at"),
+        }).collect())
+    }
+
+    async fn create_pending_link(&self, code: &str, user_id: &str, provider: &str) -> Result<()> {
+        // Expiry in 10 minutes
+        let expires_at = chrono::Utc::now() + chrono::Duration::minutes(10);
+        sqlx::query(
+            "INSERT INTO pending_links (code, user_id, provider, expires_at) VALUES (?, ?, ?, ?)"
+        )
+        .bind(code)
+        .bind(user_id)
+        .bind(provider)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_pending_link(&self, code: &str) -> Result<Option<(String, String)>> {
+        let row = sqlx::query(
+            "SELECT user_id, provider FROM pending_links WHERE code = ? AND expires_at > datetime('now')"
+        )
+        .bind(code)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| (r.get("user_id"), r.get("provider"))))
+    }
+
+    async fn delete_pending_link(&self, code: &str) -> Result<()> {
+        sqlx::query("DELETE FROM pending_links WHERE code = ?")
+            .bind(code)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

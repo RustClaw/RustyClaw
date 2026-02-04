@@ -161,6 +161,11 @@ pub async fn run(config: Config) -> Result<()> {
     let router = Router::new(config.clone(), storage.clone(), llm_client);
     tracing::info!("Router initialized");
 
+    // Check if initial setup is needed
+    if let Err(e) = router.pairing_manager.check_and_start_setup().await {
+        tracing::error!("Failed to check setup state: {}", e);
+    }
+
     // Start channel adapters
     let mut handles = vec![];
 

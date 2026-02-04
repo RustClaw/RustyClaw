@@ -3,7 +3,7 @@ use crate::api::{
     MessageResponse, ModelInfo, ModelsResponse, SessionListResponse, SessionResponse,
 };
 use crate::core::{Router, StreamEvent};
-use crate::storage::Storage;
+use crate::storage::{Storage, User};
 use crate::tools::skills::parse_skill_file;
 use crate::tools::{get_skill, list_skills, load_skill, unload_skill, CreateToolRequest};
 use axum::extract::{Path, Query, State};
@@ -35,6 +35,29 @@ pub struct MessageQuery {
 pub struct CreateSessionRequest {
     #[serde(default)]
     pub scope: Option<String>,
+}
+
+/// Setup request
+#[derive(Deserialize)]
+pub struct SetupRequest {
+    pub code: String,
+    pub username: String,
+}
+
+// ===== Setup Endpoints =====
+
+/// POST /api/setup - Claim admin account with OTP
+pub async fn setup_admin<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Json(req): Json<SetupRequest>,
+) -> Result<Json<ApiResponse<User>>, ApiError> {
+    let user = router
+        .pairing_manager
+        .claim_admin(&req.code, &req.username)
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(user)))
 }
 
 // ===== Session Endpoints =====

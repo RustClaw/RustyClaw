@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::core::{MessageResponse, SessionManager};
+use crate::core::{MessageResponse, PairingManager, SessionManager};
 use crate::llm::Client as LlmClient;
 use crate::storage::Storage;
 use anyhow::Result;
@@ -10,15 +10,18 @@ pub struct Router<S: Storage> {
     #[allow(dead_code)]
     config: Config,
     session_manager: SessionManager<S>,
+    pub pairing_manager: PairingManager<S>,
 }
 
 impl<S: Storage + 'static> Router<S> {
     pub fn new(config: Config, storage: S, llm_client: LlmClient) -> Self {
-        let session_manager = SessionManager::new(storage, config.sessions.clone(), llm_client);
+        let session_manager = SessionManager::new(storage.clone(), config.sessions.clone(), llm_client);
+        let pairing_manager = PairingManager::new(storage);
 
         Self {
             config,
             session_manager,
+            pairing_manager,
         }
     }
 

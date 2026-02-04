@@ -61,6 +61,10 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
         let public_routes = AxumRouter::new()
             .route("/health", get(health_handler))
             .route(
+                &format!("{}/setup", self.api_path),
+                post(routes::setup_admin),
+            )
+            .route(
                 &self.ws_path,
                 axum::routing::get(websocket::websocket_handler),
             )
