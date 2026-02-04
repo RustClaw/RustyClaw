@@ -150,7 +150,7 @@ impl<S: Storage + 'static> SessionManager<S> {
             .await?;
 
         // Get tools available
-        let tools = self.get_available_tools();
+        let tools = self.get_available_tools().await;
 
         // Process message through LLM with tool calling
         self.process_with_tools(session_id, tools).await
@@ -179,7 +179,7 @@ impl<S: Storage + 'static> SessionManager<S> {
             .await?;
 
         // Get tools available
-        let tools = self.get_available_tools();
+        let tools = self.get_available_tools().await;
 
         // Create channel for streaming events
         let (tx, rx) = mpsc::channel::<StreamEvent>(32);
@@ -326,7 +326,7 @@ impl<S: Storage + 'static> SessionManager<S> {
     }
 
     /// Get available tools for this session
-    fn get_available_tools(&self) -> Vec<ToolDefinition> {
+    async fn get_available_tools(&self) -> Vec<ToolDefinition> {
         let mut tools = Vec::new();
 
         // Helper function to extract tool definition from JSON
@@ -372,7 +372,7 @@ impl<S: Storage + 'static> SessionManager<S> {
         }
 
         // 4. Add skill tools from SKILL_BODIES if available
-        tools.extend(get_skill_tool_definitions());
+        tools.extend(get_skill_tool_definitions().await);
 
         tools
     }
@@ -437,29 +437,16 @@ impl<S: Storage + 'static> SessionManager<S> {
 }
 
 /// Helper function to convert skill entries to tool definitions
-fn get_skill_tool_definitions() -> Vec<ToolDefinition> {
-    // Skills are loaded asynchronously, so we use a blocking approach with tokio runtime
-    use tokio::runtime::Handle;
-
-    if let Ok(handle) = Handle::try_current() {
-        let skills_future = async {
-            crate::tools::skills::list_skills()
-                .await
-                .into_iter()
-                .map(|entry| ToolDefinition {
-                    name: entry.manifest.name,
-                    description: entry.manifest.description,
-                    parameters: entry.manifest.parameters,
-                })
-                .collect()
-        };
-
-        // Try to block on the future if we're in an async context
-        handle.block_on(skills_future)
-    } else {
-        // Not in async context, return empty for now
-        Vec::new()
-    }
+async fn get_skill_tool_definitions() -> Vec<ToolDefinition> {
+    crate::tools::skills::list_skills()
+        .await
+        .into_iter()
+        .map(|entry| ToolDefinition {
+            name: entry.manifest.name,
+            description: entry.manifest.description,
+            parameters: entry.manifest.parameters,
+        })
+        .collect()
 }
 
 /// Session statistics
