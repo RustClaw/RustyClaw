@@ -88,6 +88,10 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_PATH}/config"
 
+      - name: Stop service on CT210
+        run: |
+          ssh -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST} "systemctl stop rustyclaw-alpha || true"
+
       - name: Copy binary to CT210
         run: |
           scp -i ~/.ssh/deploy_key target/release/rustyclaw ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
