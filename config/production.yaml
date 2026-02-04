@@ -41,7 +41,7 @@ sessions:
 
 storage:
   storage_type: "sqlite"
-  path: "~/.rustyclaw/data.db"
+  path: "/root/.rustyclaw/data.db"
 
 logging:
   level: "info"
