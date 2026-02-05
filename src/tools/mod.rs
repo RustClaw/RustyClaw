@@ -15,3 +15,4 @@ pub use skills::{execute_skill, get_skill, list_skills, load_skill, unload_skill
 pub use whatsapp::{
     get_whatsapp_tool_definitions, list_whatsapp_accounts, list_whatsapp_groups, send_whatsapp,
 };
+pub mod web;

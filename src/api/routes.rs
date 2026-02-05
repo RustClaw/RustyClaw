@@ -5,7 +5,8 @@ use crate::api::{
 use crate::core::{Router, StreamEvent};
 use crate::storage::{Storage, User};
 use crate::tools::skills::parse_skill_file;
-use crate::tools::{get_skill, list_skills, load_skill, unload_skill, CreateToolRequest};
+use crate::tools::{get_skill, list_skills, load_skill, unload_skill};
+use crate::tools::creator::{CreateToolRequest, get_tool_storage_path};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{
@@ -574,56 +575,30 @@ pub async fn create_tool<S: Storage + 'static>(
     Extension(_user_id): Extension<String>,
     Json(req): Json<CreateToolRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<ToolResponse>>), ApiError> {
-    // Validate request
-    req.validate().map_err(|e| {
-        tracing::error!("Tool validation failed: {}", e);
-        ApiError::BadRequest(format!("Tool validation failed: {}", e))
-    })?;
+    let name = req.name.clone();
+    let description = req.description.clone();
 
-    // Check if tool already exists
-    if get_skill(&req.name).await.is_some() {
-        return Err(ApiError::BadRequest(format!(
-            "Tool '{}' already exists",
-            req.name
-        )));
-    }
-
-    // Get storage path
-    let storage_path = get_tool_storage_path(&req.name)?;
-
-    // Create directory if needed
-    if let Some(parent) = storage_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::InternalError(format!("Failed to create directory: {}", e)))?;
-    }
-
-    // Generate skill file content
-    let skill_content = req.to_skill_file();
-
-    // Save to disk
-    tokio::fs::write(&storage_path, &skill_content)
+    // Use shared logic
+    crate::tools::creator::handle_create_tool(req)
         .await
-        .map_err(|e| ApiError::InternalError(format!("Failed to write tool file: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Tool creation failed: {}", e);
+            ApiError::BadRequest(e.to_string())
+        })?;
 
-    // Load into registry
-    let skill_entry = parse_skill_file(&storage_path)
-        .map_err(|e| ApiError::InternalError(format!("Failed to parse tool: {}", e)))?;
-
-    load_skill(skill_entry)
-        .await
-        .map_err(|e| ApiError::InternalError(format!("Failed to load tool: {}", e)))?;
+    // Get the path for response (it must exist now)
+    let storage_path = crate::tools::creator::get_tool_storage_path(&name)
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
 
     let response = ToolResponse {
         id: format!("tool-{}", uuid::Uuid::new_v4()),
-        name: req.name.clone(),
-        description: req.description.clone(),
+        name,
+        description,
         created_at: Utc::now(),
         path: storage_path.to_string_lossy().to_string(),
         ready: true,
     };
 
-    tracing::info!("Tool created successfully: {}", req.name);
     Ok((StatusCode::CREATED, Json(ApiResponse::success(response))))
 }
 
@@ -778,7 +753,8 @@ pub async fn update_tool<S: Storage + 'static>(
     }
 
     // Get storage path for (possibly) new name
-    let storage_path = get_tool_storage_path(&req.name)?;
+    let storage_path = get_tool_storage_path(&req.name)
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
 
     // Create directory if needed
     if let Some(parent) = storage_path.parent() {
@@ -906,19 +882,7 @@ pub async fn get_all_tool_definitions<S: Storage + 'static>(
     Ok(Json(ApiResponse::success(definitions)))
 }
 
-// Helper function to get tool storage path
-fn get_tool_storage_path(name: &str) -> Result<std::path::PathBuf, ApiError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| ApiError::InternalError("Cannot determine home directory".to_string()))?;
-
-    let path = home
-        .join(".rustyclaw")
-        .join("skills")
-        .join("user-created")
-        .join(format!("{}.yaml", name));
-
-    Ok(path)
-}
+// Helper function to get tool storage path removed as it is now in crate::tools::creator
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::skills::SkillManifest;
+use super::skills::{load_skill, parse_skill_file, SkillManifest};
 
 /// Request to create a new tool/skill
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +138,57 @@ impl CreateToolRequest {
 
         format!("---\n{}---\n{}", manifest_yaml, self.body)
     }
+}
+
+/// Helper function to get tool storage path
+pub fn get_tool_storage_path(name: &str) -> Result<std::path::PathBuf> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+
+    let path = home
+        .join(".rustyclaw")
+        .join("skills")
+        .join("user-created")
+        .join(format!("{}.yaml", name));
+
+    Ok(path)
+}
+
+/// Core logic for tool creation, shared between API and Tool Executor
+pub async fn handle_create_tool(req: CreateToolRequest) -> Result<String> {
+    // Validate request
+    req.validate()?;
+
+    // Check if tool already exists
+    if super::skills::get_skill(&req.name).await.is_some() {
+        return Err(anyhow!("Tool '{}' already exists", req.name));
+    }
+
+    // Get storage path
+    let storage_path = get_tool_storage_path(&req.name)?;
+
+    // Create directory if needed
+    if let Some(parent) = storage_path.parent() {
+        std::fs::create_dir_all(parent)
+            .context(format!("Failed to create directory: {:?}", parent))?;
+    }
+
+    // Generate skill file content
+    let skill_content = req.to_skill_file();
+
+    // Save to disk
+    std::fs::write(&storage_path, &skill_content)
+        .context(format!("Failed to write tool file: {:?}", storage_path))?;
+
+    // Load into registry
+    let skill_entry = parse_skill_file(&storage_path)
+        .context("Failed to parse newly created tool")?;
+
+    load_skill(skill_entry)
+        .await
+        .context("Failed to load newly created tool into registry")?;
+
+    Ok(format!("✓ Tool '{}' created and loaded successfully. It is now available for use.", req.name))
 }
 
 // Syntax validators

@@ -1,3 +1,4 @@
+use crate::core::events::{publish_event, SystemEvent};
 use anyhow::{Context, Result};
 use notify_debouncer_mini::new_debouncer;
 use std::path::PathBuf;
@@ -101,6 +102,12 @@ impl SkillWatcher {
                             Ok(entry) => match super::skills::load_skill(entry).await {
                                 Ok(_) => {
                                     info!("Loaded skill from: {}", path.display());
+                                    publish_event(SystemEvent::ToolUpdated(
+                                        super::skills::parse_skill_file(&path)
+                                            .unwrap()
+                                            .manifest
+                                            .name,
+                                    ));
                                 }
                                 Err(e) => {
                                     warn!("Failed to load skill from {}: {}", path.display(), e);
@@ -133,6 +140,7 @@ impl SkillWatcher {
                             skill_name,
                             path.display()
                         );
+                        publish_event(SystemEvent::ToolUpdated(skill_name));
                     }
                     Err(e) => {
                         warn!("Failed to load skill '{}': {}", skill_name, e);
@@ -159,6 +167,7 @@ impl SkillWatcher {
                                 entry.manifest.name,
                                 path.display()
                             );
+                            publish_event(SystemEvent::ToolRemoved(entry.manifest.name));
                         }
                         Err(e) => {
                             warn!("Failed to unload skill '{}': {}", entry.manifest.name, e);

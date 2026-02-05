@@ -14,6 +14,8 @@ use axum::{Json, Router as AxumRouter};
 use std::sync::Arc;
 use tracing::info;
 
+use crate::mcp::sse::{messages_handler, sse_handler};
+
 pub use auth::AuthManager;
 pub use error::ApiError;
 pub use response::*;
@@ -162,6 +164,9 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
                 &format!("{}/tools/definitions/all", self.api_path),
                 get(routes::get_all_tool_definitions),
             )
+            // MCP Endpoints
+            .route("/mcp/sse", get(sse_handler))
+            .route("/mcp/messages", post(messages_handler))
             .with_state(self.router.clone())
             .layer(axum::middleware::from_fn_with_state(
                 self.auth_manager.clone(),

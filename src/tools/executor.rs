@@ -71,6 +71,21 @@ pub async fn execute_tool_with_context(
                 .context("Failed to parse list_whatsapp_accounts parameters")?;
             whatsapp::list_whatsapp_accounts(_params).await
         }
+        "create_tool" => {
+            let params: super::creator::CreateToolRequest = serde_json::from_str(arguments)
+                .context("Failed to parse create_tool parameters")?;
+            super::creator::handle_create_tool(params).await
+        }
+        "web_fetch" => {
+            let params: super::web::WebFetchParams = serde_json::from_str(arguments)
+                .context("Failed to parse web_fetch parameters")?;
+            super::web::web_fetch(params).await
+        }
+        "web_search" => {
+            let params: super::web::WebSearchParams = serde_json::from_str(arguments)
+                .context("Failed to parse web_search parameters")?;
+            super::web::web_search(params).await
+        }
         _ => {
             // Try to find in skills registry
             if super::skills::get_skill(name).await.is_some() {
