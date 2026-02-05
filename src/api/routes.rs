@@ -44,20 +44,29 @@ pub struct SetupRequest {
     pub username: String,
 }
 
+/// Setup response
+#[derive(serde::Serialize)]
+pub struct SetupResponse {
+    pub user: User,
+    pub token: String,
+}
+
 // ===== Setup Endpoints =====
 
 /// POST /api/setup - Claim admin account with OTP
 pub async fn setup_admin<S: Storage + 'static>(
     State(router): State<Arc<Router<S>>>,
     Json(req): Json<SetupRequest>,
-) -> Result<Json<ApiResponse<User>>, ApiError> {
-    let user = router
+) -> Result<Json<ApiResponse<SetupResponse>>, ApiError> {
+    let (user, token) = router
         .pairing_manager
         .claim_admin(&req.code, &req.username)
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-    Ok(Json(ApiResponse::success(user)))
+    let response = SetupResponse { user, token };
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
 // ===== Session Endpoints =====

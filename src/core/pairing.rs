@@ -1,4 +1,4 @@
-use crate::storage::{Storage, User};
+use crate::storage::{Identity, Storage, User};
 use anyhow::Result;
 use chrono::Utc;
 use qr2term::print_qr;
@@ -58,7 +58,7 @@ impl<S: Storage + 'static> PairingManager<S> {
         Ok(Some(code))
     }
     /// Attempt to claim admin status using the setup code
-    pub async fn claim_admin(&self, code: &str, username: &str) -> Result<User> {
+    pub async fn claim_admin(&self, code: &str, username: &str) -> Result<(User, String)> {
         // 1. Verify code
         {
             let code_guard = self.setup_code.lock().unwrap();
@@ -87,14 +87,26 @@ impl<S: Storage + 'static> PairingManager<S> {
 
         self.storage.create_user(user.clone()).await?;
 
-        // 4. Clear code
+        // 4. Generate API Token and Identity
+        let token = format!("sk-rustyclaw-{}", Uuid::new_v4());
+        let identity = Identity {
+            provider: "api_token".to_string(),
+            provider_id: token.clone(), // TODO: Hash this in production!
+            user_id: user.id.clone(),
+            label: Some("Initial Admin Token".to_string()),
+            created_at: Utc::now(),
+            last_used_at: None,
+        };
+        self.storage.create_identity(identity).await?;
+
+        // 5. Clear code
         {
             let mut code_guard = self.setup_code.lock().unwrap();
             *code_guard = None;
         }
 
         tracing::info!("Admin account created: {}", username);
-        Ok(user)
+        Ok((user, token))
     }
 }
 
