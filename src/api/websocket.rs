@@ -26,11 +26,11 @@ pub struct WsQuery {
 pub async fn websocket_handler<S: Storage + 'static>(
     ws: WebSocketUpgrade,
     State(router): State<Arc<Router<S>>>,
-    Extension(auth): Extension<AuthManager>,
+    Extension(auth): Extension<AuthManager<S>>,
     Query(params): Query<WsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Validate token
-    let user_id = auth.validate_token_str(&params.token)?;
+    let user_id = auth.validate_token_str(&params.token).await?;
 
     debug!(
         "WebSocket connection: user={}, session={:?}",

@@ -181,6 +181,7 @@ pub async fn run(config: Config) -> Result<()> {
             config.api.host.clone(),
             config.api.port,
             config.api.tokens.clone(),
+            storage.clone(),
         );
         let api_handle = tokio::spawn(async move { api_adapter.start().await });
         handles.push(api_handle);

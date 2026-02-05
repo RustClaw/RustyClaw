@@ -21,7 +21,7 @@ pub use response::*;
 /// Web API adapter for HTTP/WebSocket access
 pub struct WebApiAdapter<S: Storage> {
     router: Arc<Router<S>>,
-    auth_manager: AuthManager,
+    auth_manager: AuthManager<S>,
     host: String,
     port: u16,
     api_path: String,
@@ -30,8 +30,8 @@ pub struct WebApiAdapter<S: Storage> {
 
 impl<S: Storage + 'static> WebApiAdapter<S> {
     /// Create new Web API adapter
-    pub fn new(router: Arc<Router<S>>, host: String, port: u16, tokens: Vec<String>) -> Self {
-        let auth_manager = AuthManager::new(tokens);
+    pub fn new(router: Arc<Router<S>>, host: String, port: u16, tokens: Vec<String>, storage: S) -> Self {
+        let auth_manager = AuthManager::new(tokens, storage);
 
         Self {
             router,
@@ -42,6 +42,7 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             ws_path: "/ws".to_string(),
         }
     }
+
 
     /// Set custom API path
     pub fn with_api_path(mut self, path: String) -> Self {
@@ -219,8 +220,8 @@ async fn logging_middleware(
 }
 
 /// Middleware to provide AuthManager as an extension
-async fn provide_auth_extension(
-    axum::extract::State(auth): axum::extract::State<AuthManager>,
+async fn provide_auth_extension<S: Storage + 'static>(
+    axum::extract::State(auth): axum::extract::State<AuthManager<S>>,
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
