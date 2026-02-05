@@ -65,6 +65,10 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
                 post(routes::setup_admin),
             )
             .route(
+                &format!("{}/auth/join", self.api_path),
+                post(routes::join_invite),
+            )
+            .route(
                 &self.ws_path,
                 axum::routing::get(websocket::websocket_handler),
             )
@@ -76,6 +80,11 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
 
         // Protected endpoints (auth required)
         let api_routes = AxumRouter::new()
+            // Auth endpoints
+            .route(
+                &format!("{}/auth/invite", self.api_path),
+                post(routes::create_invite),
+            )
             // Session endpoints
             .route(
                 &format!("{}/sessions", self.api_path),

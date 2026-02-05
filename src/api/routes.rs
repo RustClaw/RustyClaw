@@ -51,6 +51,32 @@ pub struct SetupResponse {
     pub token: String,
 }
 
+/// Invite request
+#[derive(Deserialize)]
+pub struct InviteRequest {}
+
+/// Invite response
+#[derive(serde::Serialize)]
+pub struct InviteResponse {
+    pub code: String,
+    pub expires_at: chrono::DateTime<Utc>,
+    pub uri: String,
+}
+
+/// Join request
+#[derive(Deserialize)]
+pub struct JoinRequest {
+    pub code: String,
+    pub label: String,
+}
+
+/// Join response
+#[derive(serde::Serialize)]
+pub struct JoinResponse {
+    pub user: User,
+    pub token: String,
+}
+
 // ===== Setup Endpoints =====
 
 /// POST /api/setup - Claim admin account with OTP
@@ -67,6 +93,41 @@ pub async fn setup_admin<S: Storage + 'static>(
     let response = SetupResponse { user, token };
 
     Ok(Json(ApiResponse::success(response)))
+}
+
+/// POST /api/auth/invite - Generate a device linking code
+pub async fn create_invite<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Extension(user_id): Extension<String>,
+    Json(_req): Json<InviteRequest>,
+) -> Result<Json<ApiResponse<InviteResponse>>, ApiError> {
+    let code = router
+        .pairing_manager
+        .create_invite(&user_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    let response = InviteResponse {
+        code: code.clone(),
+        expires_at: Utc::now() + chrono::Duration::minutes(10),
+        uri: format!("rustyclaw://join?code={}", code),
+    };
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// POST /api/auth/join - Redeem an invite code
+pub async fn join_invite<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Json(req): Json<JoinRequest>,
+) -> Result<Json<ApiResponse<JoinResponse>>, ApiError> {
+    let (user, token) = router
+        .pairing_manager
+        .redeem_invite(&req.code, &req.label)
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(JoinResponse { user, token })))
 }
 
 // ===== Session Endpoints =====
