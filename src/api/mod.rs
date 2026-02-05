@@ -30,7 +30,13 @@ pub struct WebApiAdapter<S: Storage> {
 
 impl<S: Storage + 'static> WebApiAdapter<S> {
     /// Create new Web API adapter
-    pub fn new(router: Arc<Router<S>>, host: String, port: u16, tokens: Vec<String>, storage: S) -> Self {
+    pub fn new(
+        router: Arc<Router<S>>,
+        host: String,
+        port: u16,
+        tokens: Vec<String>,
+        storage: S,
+    ) -> Self {
         let auth_manager = AuthManager::new(tokens, storage);
 
         Self {
@@ -42,7 +48,6 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             ws_path: "/ws".to_string(),
         }
     }
-
 
     /// Set custom API path
     pub fn with_api_path(mut self, path: String) -> Self {
