@@ -3,7 +3,10 @@ use super::types::{JsonRpcNotification, JsonRpcRequest};
 use crate::core::events::{subscribe, SystemEvent};
 use axum::{
     extract::Query,
-    response::{sse::{Event, Sse}, IntoResponse},
+    response::{
+        sse::{Event, Sse},
+        IntoResponse,
+    },
     Json,
 };
 use futures::stream::Stream;
@@ -43,10 +46,13 @@ impl McpSessionManager {
     pub async fn create_session(&self) -> (String, impl Stream<Item = Result<Event, Infallible>>) {
         let session_id = Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::unbounded_channel();
-        
+
         // Register session
-        self.sessions.write().await.insert(session_id.clone(), tx.clone());
-        
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), tx.clone());
+
         // Spawn system event listener for this session
         let session_id_clone = session_id.clone();
         let tx_clone = tx.clone();
@@ -61,9 +67,12 @@ impl McpSessionManager {
                             method: "notifications/tools/list_changed".to_string(),
                             params: None,
                         };
-                        
+
                         if let Ok(json) = serde_json::to_string(&notification) {
-                            if tx_clone.send(Ok(Event::default().event("message").data(json))).is_err() {
+                            if tx_clone
+                                .send(Ok(Event::default().event("message").data(json)))
+                                .is_err()
+                            {
                                 break; // Channel closed
                             }
                         }
@@ -74,7 +83,10 @@ impl McpSessionManager {
             debug!("Event listener stopped for session {}", session_id_clone);
         });
 
-        (session_id, tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
+        (
+            session_id,
+            tokio_stream::wrappers::UnboundedReceiverStream::new(rx),
+        )
     }
 
     pub async fn get_sender(&self, session_id: &str) -> Option<SseSender> {
@@ -106,25 +118,20 @@ impl McpSessionManager {
 #[derive(Deserialize)]
 pub struct SseQuery {}
 
-pub async fn sse_handler(
-    Query(_params): Query<SseQuery>,
-) -> impl IntoResponse {
+pub async fn sse_handler(Query(_params): Query<SseQuery>) -> impl IntoResponse {
     let (session_id, stream) = SESSION_MANAGER.create_session().await;
-    
+
     info!("New MCP session started: {}", session_id);
 
     // Send the endpoint event as the first event
     let endpoint_url = format!("/mcp/messages?sessionId={}", session_id);
-    let endpoint_event = Event::default()
-        .event("endpoint")
-        .data(endpoint_url);
+    let endpoint_event = Event::default().event("endpoint").data(endpoint_url);
 
     if let Some(tx) = SESSION_MANAGER.get_sender(&session_id).await {
         let _ = tx.send(Ok(endpoint_event));
     }
 
-    Sse::new(stream)
-        .keep_alive(axum::response::sse::KeepAlive::default())
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
 #[derive(Deserialize)]
@@ -138,6 +145,8 @@ pub async fn messages_handler(
     Json(req): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
     debug!("Received MCP message for session {}", params.session_id);
-    SESSION_MANAGER.handle_message(&params.session_id, req).await;
+    SESSION_MANAGER
+        .handle_message(&params.session_id, req)
+        .await;
     axum::http::StatusCode::ACCEPTED
 }

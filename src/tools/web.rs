@@ -32,15 +32,18 @@ pub async fn web_fetch(params: WebFetchParams) -> Result<String> {
 
     let response = client.get(&params.url).send().await?;
     let status = response.status();
-    
+
     if !status.is_success() {
         return Ok(format!("Error fetching {}: HTTP {}", params.url, status));
     }
 
     let text = response.text().await?;
-    
+
     // Very basic HTML to text conversion for now
-    let content = if params.url.ends_with(".json") || text.trim().starts_with('{') || text.trim().starts_with('[') {
+    let content = if params.url.ends_with(".json")
+        || text.trim().starts_with('{')
+        || text.trim().starts_with('[')
+    {
         text
     } else {
         // Strip scripts and styles and common tags (naive approach)
@@ -52,11 +55,15 @@ pub async fn web_fetch(params: WebFetchParams) -> Result<String> {
             .map(|part| part.split("</style>").last().unwrap_or(""))
             .collect::<Vec<_>>()
             .join(" ")
-            .replace("<br>", "
-")
-            .replace("<p>", "
+            .replace(
+                "<br>", "
+",
+            )
+            .replace(
+                "<p>", "
 
-")
+",
+            )
             .chars()
             .filter(|&c| c != '<' && c != '>') // very naive tag stripping
             .collect()
@@ -68,7 +75,7 @@ pub async fn web_fetch(params: WebFetchParams) -> Result<String> {
 /// Search the web
 pub async fn web_search(params: WebSearchParams) -> Result<String> {
     tracing::info!("Web search for: {}", params.query);
-    
+
     // In a real implementation, this would use a Search API.
     // For now, we return a simulated result pointing to key resources.
     Ok(format!(

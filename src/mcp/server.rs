@@ -1,7 +1,7 @@
 use super::types::*;
 use crate::tools::{
-    exec::get_exec_tool_definitions, skills::list_skills, whatsapp::get_whatsapp_tool_definitions,
-    web::get_web_tool_definitions,
+    exec::get_exec_tool_definitions, skills::list_skills, web::get_web_tool_definitions,
+    whatsapp::get_whatsapp_tool_definitions,
 };
 use serde_json::Value;
 use tracing::{error, info};
@@ -15,7 +15,7 @@ impl Default for McpServer {
 }
 
 impl McpServer {
-// ... existing methods ...
+    // ... existing methods ...
     pub fn new() -> Self {
         Self
     }
@@ -185,11 +185,7 @@ impl McpServer {
         JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
     }
 
-    async fn handle_call_tool(
-        &self,
-        id: Option<Value>,
-        params: Option<Value>,
-    ) -> JsonRpcResponse {
+    async fn handle_call_tool(&self, id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
         let params: CallToolParams = match serde_json::from_value(params.unwrap_or(Value::Null)) {
             Ok(p) => p,
             Err(e) => return JsonRpcResponse::error(id, -32602, format!("Invalid params: {}", e)),

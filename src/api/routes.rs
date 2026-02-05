@@ -4,9 +4,9 @@ use crate::api::{
 };
 use crate::core::{Router, StreamEvent};
 use crate::storage::{Storage, User};
+use crate::tools::creator::{get_tool_storage_path, CreateToolRequest};
 use crate::tools::skills::parse_skill_file;
 use crate::tools::{get_skill, list_skills, load_skill, unload_skill};
-use crate::tools::creator::{CreateToolRequest, get_tool_storage_path};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{
@@ -753,8 +753,8 @@ pub async fn update_tool<S: Storage + 'static>(
     }
 
     // Get storage path for (possibly) new name
-    let storage_path = get_tool_storage_path(&req.name)
-        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+    let storage_path =
+        get_tool_storage_path(&req.name).map_err(|e| ApiError::InternalError(e.to_string()))?;
 
     // Create directory if needed
     if let Some(parent) = storage_path.parent() {

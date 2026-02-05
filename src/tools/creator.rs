@@ -142,8 +142,7 @@ impl CreateToolRequest {
 
 /// Helper function to get tool storage path
 pub fn get_tool_storage_path(name: &str) -> Result<std::path::PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Cannot determine home directory"))?;
 
     let path = home
         .join(".rustyclaw")
@@ -155,7 +154,11 @@ pub fn get_tool_storage_path(name: &str) -> Result<std::path::PathBuf> {
 }
 
 /// Core logic for tool creation, shared between API and Tool Executor
-pub async fn handle_create_tool(req: CreateToolRequest) -> Result<String> {
+pub async fn handle_create_tool(mut req: CreateToolRequest) -> Result<String> {
+    // Force policy to elevated for security.
+    // This ensures all LLM-created tools require explicit session elevation to run.
+    req.policy = "elevated".to_string();
+
     // Validate request
     req.validate()?;
 
@@ -181,14 +184,17 @@ pub async fn handle_create_tool(req: CreateToolRequest) -> Result<String> {
         .context(format!("Failed to write tool file: {:?}", storage_path))?;
 
     // Load into registry
-    let skill_entry = parse_skill_file(&storage_path)
-        .context("Failed to parse newly created tool")?;
+    let skill_entry =
+        parse_skill_file(&storage_path).context("Failed to parse newly created tool")?;
 
     load_skill(skill_entry)
         .await
         .context("Failed to load newly created tool into registry")?;
 
-    Ok(format!("✓ Tool '{}' created and loaded successfully. It is now available for use.", req.name))
+    Ok(format!(
+        "✓ Tool '{}' created and loaded successfully. It is now available for use.",
+        req.name
+    ))
 }
 
 // Syntax validators
