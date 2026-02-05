@@ -162,10 +162,7 @@ pub async fn handle_create_tool(mut req: CreateToolRequest) -> Result<String> {
     // Validate request
     req.validate()?;
 
-    // Check if tool already exists
-    if super::skills::get_skill(&req.name).await.is_some() {
-        return Err(anyhow!("Tool '{}' already exists", req.name));
-    }
+    let is_update = super::skills::get_skill(&req.name).await.is_some();
 
     // Get storage path
     let storage_path = get_tool_storage_path(&req.name)?;
@@ -179,11 +176,11 @@ pub async fn handle_create_tool(mut req: CreateToolRequest) -> Result<String> {
     // Generate skill file content
     let skill_content = req.to_skill_file();
 
-    // Save to disk
+    // Save to disk (overwrites if exists)
     std::fs::write(&storage_path, &skill_content)
         .context(format!("Failed to write tool file: {:?}", storage_path))?;
 
-    // Load into registry
+    // Load into registry (Skills registry handles overwriting internally)
     let skill_entry =
         parse_skill_file(&storage_path).context("Failed to parse newly created tool")?;
 
@@ -191,10 +188,36 @@ pub async fn handle_create_tool(mut req: CreateToolRequest) -> Result<String> {
         .await
         .context("Failed to load newly created tool into registry")?;
 
-    Ok(format!(
-        "✓ Tool '{}' created and loaded successfully. It is now available for use.",
-        req.name
-    ))
+    if is_update {
+        Ok(format!(
+            "✓ Tool '{}' updated successfully. The fix has been applied.",
+            req.name
+        ))
+    } else {
+        Ok(format!(
+            "✓ Tool '{}' created and loaded successfully. It is now available for use.",
+            req.name
+        ))
+    }
+}
+
+/// Core logic for tool deletion
+pub async fn handle_delete_tool(name: String) -> Result<String> {
+    let skill = super::skills::get_skill(&name)
+        .await
+        .ok_or_else(|| anyhow!("Tool '{}' not found", name))?;
+
+    // Unload from registry
+    super::skills::unload_skill(&name)
+        .await
+        .context("Failed to unload tool from registry")?;
+
+    // Delete file
+    if skill.source_path.exists() {
+        std::fs::remove_file(&skill.source_path).context("Failed to delete tool file from disk")?;
+    }
+
+    Ok(format!("✓ Tool '{}' deleted successfully.", name))
 }
 
 // Syntax validators

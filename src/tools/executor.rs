@@ -76,6 +76,15 @@ pub async fn execute_tool_with_context(
                 .context("Failed to parse create_tool parameters")?;
             super::creator::handle_create_tool(params).await
         }
+        "delete_tool" => {
+            #[derive(serde::Deserialize)]
+            struct DeleteParams {
+                name: String,
+            }
+            let params: DeleteParams = serde_json::from_str(arguments)
+                .context("Failed to parse delete_tool parameters")?;
+            super::creator::handle_delete_tool(params.name).await
+        }
         "web_fetch" => {
             let params: super::web::WebFetchParams =
                 serde_json::from_str(arguments).context("Failed to parse web_fetch parameters")?;

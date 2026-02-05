@@ -159,6 +159,21 @@ impl McpServer {
             }),
         });
 
+        tools.push(Tool {
+            name: "delete_tool".to_string(),
+            description: Some("Permanently delete a tool you created. Use this to clean up failed experiments or outdated tools.".to_string()),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the tool to delete"
+                    }
+                },
+                "required": ["name"]
+            }),
+        });
+
         // 5. Plugins
         if let Some(registry) = crate::plugins::get_plugin_registry() {
             match registry.tools.list_tools() {
