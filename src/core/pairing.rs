@@ -108,6 +108,55 @@ impl<S: Storage + 'static> PairingManager<S> {
         tracing::info!("Admin account created: {}", username);
         Ok((user, token))
     }
+
+    /// Create an invite code for a user to link a new device
+    pub async fn create_invite(&self, user_id: &str) -> Result<String> {
+        let code = generate_setup_code();
+        // Store in DB
+        self.storage
+            .create_pending_link(&code, user_id, "device_link")
+            .await?;
+        Ok(code)
+    }
+
+    /// Redeem an invite code to get a new API token
+    pub async fn redeem_invite(&self, code: &str, label: &str) -> Result<(User, String)> {
+        // 1. Validate code
+        let link_data = self
+            .storage
+            .get_pending_link(code)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Invalid or expired invite code"))?;
+
+        let (user_id, provider) = link_data;
+        if provider != "device_link" {
+            anyhow::bail!("Invalid invite type");
+        }
+
+        // 2. Get User
+        let user = self
+            .storage
+            .get_user(&user_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+
+        // 3. Generate Token
+        let token = format!("sk-rustyclaw-{}", Uuid::new_v4());
+        let identity = Identity {
+            provider: "api_token".to_string(),
+            provider_id: token.clone(),
+            user_id: user.id.clone(),
+            label: Some(label.to_string()),
+            created_at: Utc::now(),
+            last_used_at: None,
+        };
+        self.storage.create_identity(identity).await?;
+
+        // 4. Delete used code
+        self.storage.delete_pending_link(code).await?;
+
+        Ok((user, token))
+    }
 }
 
 fn generate_setup_code() -> String {
