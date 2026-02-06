@@ -12,6 +12,7 @@ Cargo.lock
 rustyclaw.md
 /docs
 *.md
+!/templates/*.md
 
 # Development tools
 .claude/
