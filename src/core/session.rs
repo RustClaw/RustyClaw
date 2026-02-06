@@ -1,9 +1,12 @@
-use crate::config::SessionsConfig;
+use crate::config::Config;
+use crate::config::workspace::Workspace;
+use crate::core::prompt::SystemPromptBuilder;
 use crate::llm::{ChatMessage, ChatRequest, Client as LlmClient, ToolDefinition};
 use crate::storage::{Message as StorageMessage, Session as StorageSession, Storage};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Stream events sent from process_message_stream
@@ -28,8 +31,9 @@ pub enum StreamEvent {
 #[derive(Clone)]
 pub struct SessionManager<S: Storage> {
     storage: S,
-    config: SessionsConfig,
+    config: Arc<RwLock<Config>>,
     llm_client: LlmClient,
+    workspace: Workspace,
 }
 
 #[derive(Clone)]
@@ -48,17 +52,50 @@ pub struct MessageResponse {
 }
 
 impl<S: Storage + 'static> SessionManager<S> {
-    pub fn new(storage: S, config: SessionsConfig, llm_client: LlmClient) -> Self {
+    pub fn new(
+        storage: S,
+        config: Arc<RwLock<Config>>,
+        llm_client: LlmClient,
+        workspace: Workspace,
+    ) -> Self {
         Self {
             storage,
             config,
             llm_client,
+            workspace,
+        }
+    }
+
+    pub fn workspace(&self) -> &crate::config::workspace::Workspace {
+        &self.workspace
+    }
+
+    /// Resolve workspace based on agent ID
+    async fn resolve_workspace(&self, agent_id: Option<&str>) -> crate::config::workspace::Workspace {
+        if let Some(agent_name) = agent_id {
+            let config = self.config.read().await;
+            if let Some(agent_config) = config.agents.get(agent_name) {
+                if let Some(path) = &agent_config.workspace {
+                    // Use configured path
+                    Workspace::new(path.clone())
+                } else {
+                    // Use default path: ~/.rustyclaw/agents/<name>/workspace
+                    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+                    Workspace::new(home.join(".rustyclaw").join("agents").join(agent_name).join("workspace"))
+                }
+            } else {
+                // Unknown agent, fallback to default
+                self.workspace.clone()
+            }
+        } else {
+            // Default agent (system)
+            self.workspace.clone()
         }
     }
 
     /// Parse channel routing mode from config
-    fn get_channel_routing_mode(&self) -> crate::config::ChannelRoutingMode {
-        match self.config.channel_routing.as_str() {
+    async fn get_channel_routing_mode(&self) -> crate::config::ChannelRoutingMode {
+        match self.config.read().await.sessions.channel_routing.as_str() {
             "shared" => crate::config::ChannelRoutingMode::Shared,
             "bridged" => crate::config::ChannelRoutingMode::Bridged,
             _ => crate::config::ChannelRoutingMode::Isolated, // Default to isolated
@@ -66,8 +103,8 @@ impl<S: Storage + 'static> SessionManager<S> {
     }
 
     /// Determine effective channel based on routing mode
-    fn get_effective_channel(&self, channel: &str) -> String {
-        match self.get_channel_routing_mode() {
+    async fn get_effective_channel(&self, channel: &str) -> String {
+        match self.get_channel_routing_mode().await {
             crate::config::ChannelRoutingMode::Isolated => {
                 // Each channel has separate sessions
                 channel.to_string()
@@ -84,23 +121,38 @@ impl<S: Storage + 'static> SessionManager<S> {
     }
 
     /// Get or create a session for a user
-    pub async fn get_or_create_session(&self, user_id: &str, channel: &str) -> Result<Session> {
-        let scope = &self.config.scope;
-        let effective_channel = self.get_effective_channel(channel);
+    pub async fn get_or_create_session(
+        &self,
+        user_id: &str,
+        channel: &str,
+        agent_id: Option<&str>,
+    ) -> Result<Session> {
+        let (scope, channel_routing) = {
+            let config = self.config.read().await;
+            (config.sessions.scope.clone(), config.sessions.channel_routing.clone())
+        };
+        
+        let mut effective_channel = self.get_effective_channel(channel).await;
+
+        // Scope to agent if specified
+        if let Some(agent) = agent_id {
+            effective_channel = format!("{}:{}", agent, effective_channel);
+        }
 
         tracing::info!(
-            "Session lookup: user={}, channel={}, effective_channel={}, scope={}, routing={}",
+            "Session lookup: user={}, channel={}, effective_channel={}, scope={}, routing={}, agent={:?}",
             user_id,
             channel,
             effective_channel,
             scope,
-            self.config.channel_routing
+            channel_routing,
+            agent_id
         );
 
         // Try to find existing session
         if let Some(session) = self
             .storage
-            .find_session(user_id, &effective_channel, scope)
+            .find_session(user_id, &effective_channel, &scope)
             .await?
         {
             // Update last accessed time
@@ -140,20 +192,32 @@ impl<S: Storage + 'static> SessionManager<S> {
     /// Process a user message and return the assistant's response
     /// This is the main method for handling conversations
     /// Handles tool calling with automatic feedback loops
+    /// Process a user message and return the assistant's response
+    /// This is the main method for handling conversations
+    /// Handles tool calling with automatic feedback loops
     pub async fn process_message(
         &self,
         session_id: &str,
         user_message: &str,
+        agent_id: Option<&str>,
     ) -> Result<MessageResponse> {
         // Add user message to storage
         self.add_message(session_id, "user", user_message, None, None)
             .await?;
 
+        // Check for compaction
+        if let Err(e) = self.compact_session(session_id).await {
+            tracing::warn!("Session compaction failed: {}", e);
+        }
+
         // Get tools available
         let tools = self.get_available_tools().await;
 
+        // Resolve workspace for agent
+        let workspace = self.resolve_workspace(agent_id).await;
+
         // Process message through LLM with tool calling
-        self.process_with_tools(session_id, tools).await
+        self.process_with_tools(session_id, tools, workspace).await
     }
 
     /// Process a user message with streaming (returns receiver for StreamEvent)
@@ -173,10 +237,16 @@ impl<S: Storage + 'static> SessionManager<S> {
         &self,
         session_id: &str,
         user_message: &str,
+        agent_id: Option<&str>,
     ) -> Result<mpsc::Receiver<StreamEvent>> {
         // Add user message to storage
         self.add_message(session_id, "user", user_message, None, None)
             .await?;
+
+        // Check for compaction
+        if let Err(e) = self.compact_session(session_id).await {
+            tracing::warn!("Session compaction failed: {}", e);
+        }
 
         // Get tools available
         let tools = self.get_available_tools().await;
@@ -188,11 +258,12 @@ impl<S: Storage + 'static> SessionManager<S> {
         let storage = self.storage.clone();
         let llm_client = self.llm_client.clone();
         let session_id = session_id.to_string();
+        let workspace = self.resolve_workspace(agent_id).await;
 
         // Spawn streaming task
         tokio::spawn(async move {
             if let Err(e) =
-                process_message_stream_task(storage, llm_client, session_id, tools, tx).await
+                process_message_stream_task(storage, llm_client, session_id, tools, tx, workspace).await
             {
                 tracing::error!("Error in streaming task: {}", e);
             }
@@ -203,10 +274,13 @@ impl<S: Storage + 'static> SessionManager<S> {
 
     /// Process message with tool support
     /// Handles tool calling loops until the model generates final response
+    /// Process message with tool support
+    /// Handles tool calling loops until the model generates final response
     async fn process_with_tools(
         &self,
         session_id: &str,
         tools: Vec<ToolDefinition>,
+        workspace: Workspace,
     ) -> Result<MessageResponse> {
         // Get conversation history
         let history = self
@@ -216,13 +290,18 @@ impl<S: Storage + 'static> SessionManager<S> {
             .context("Failed to get message history")?;
 
         // Convert storage messages to LLM messages
-        let mut llm_messages: Vec<ChatMessage> = history
-            .iter()
-            .map(|msg| ChatMessage {
-                role: msg.role.clone(),
-                content: msg.content.clone(),
-            })
-            .collect();
+        // Build dynamic system prompt
+        let system_prompt = SystemPromptBuilder::new(workspace.clone(), tools.clone()).build();
+        
+        let mut llm_messages: Vec<ChatMessage> = vec![ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt,
+        }];
+        
+        llm_messages.extend(history.iter().map(|msg| ChatMessage {
+            role: msg.role.clone(),
+            content: msg.content.clone(),
+        }));
 
         tracing::info!(
             "Processing message for session {}: {} messages in context, {} tools available",
@@ -354,6 +433,9 @@ impl<S: Storage + 'static> SessionManager<S> {
             }
         }
 
+        // Add memory tools
+        tools.extend(crate::tools::get_memory_tool_definitions());
+
         // 1b. Add creator tools (always available)
         let creator_defs = crate::tools::get_creator_tool_definitions();
         for def in creator_defs {
@@ -454,6 +536,94 @@ impl<S: Storage + 'static> SessionManager<S> {
             models_used,
         })
     }
+
+    /// Check if session needs compaction based on configuration
+    async fn check_compaction_needed(&self, session_id: &str) -> Result<bool> {
+        let enabled = self.config.read().await.sessions.compaction_enabled;
+        if !enabled {
+            return Ok(false);
+        }
+
+        // Check explicit threshold if available, otherwise heuristics
+        // Currently using message count heuristic
+        let messages = self.storage.get_messages(session_id, None).await?;
+        Ok(messages.len() > 50)
+    }
+
+    /// Compact session by summarizing old messages and moving them to memory
+    pub async fn compact_session(&self, session_id: &str) -> Result<()> {
+        if !self.check_compaction_needed(session_id).await? {
+            return Ok(());
+        }
+
+        tracing::info!("Compacting session {}", session_id);
+
+        let messages = self.storage.get_messages(session_id, None).await?;
+        if messages.len() < 20 {
+            return Ok(());
+        }
+
+        // Keep last 10 messages
+        let keep_count = 10;
+        let split_idx = messages.len().saturating_sub(keep_count);
+        
+        // Ensure we don't split if there's nothing to summarize
+        if split_idx == 0 {
+            return Ok(());
+        }
+
+        let to_summarize = &messages[..split_idx];
+        let keep_messages = &messages[split_idx..];
+
+        // Build summary prompt
+        let conversation_text = to_summarize.iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let summary_request = ChatRequest {
+            model: String::new(), // Auto-route
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "You are a helpful assistant. Summarize the following conversation, extracting key facts, user preferences, and the current goal. Be concise.".to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: conversation_text,
+                },
+            ],
+            max_tokens: None,
+            temperature: Some(0.0),
+            tools: None,
+        };
+
+        // Call LLM for summary
+        let response = self.llm_client.chat(summary_request).await
+            .context("Failed to generate session summary")?;
+            
+        let summary = response.content;
+        
+        // Append to memory
+        let memory_manager = crate::core::memory::MemoryManager::new(self.workspace.path());
+        memory_manager.append_memory(&format!("Session {} Compacted Summary: {}", session_id, summary))
+            .context("Failed to save session summary to memory")?;
+
+        // Rewrite session logs: ALL or NOTHING approach (safest without transaction)
+        
+        // 1. Delete ALL messages
+        self.storage.delete_session_messages(session_id).await
+            .context("Failed to clear session messages for compaction")?;
+
+        // 2. Re-insert kept messages
+        for msg in keep_messages {
+            self.storage.add_message(msg.clone()).await
+                .context("Failed to restore kept messages after compaction")?;
+        }
+
+        tracing::info!("Session {} compacted. Summary saved to memory.", session_id);
+        Ok(())
+    }
 }
 
 /// Helper function to convert skill entries to tool definitions
@@ -493,6 +663,7 @@ async fn process_message_stream_task<S: Storage + 'static>(
     session_id: String,
     tools: Vec<ToolDefinition>,
     tx: mpsc::Sender<StreamEvent>,
+    workspace: Workspace,
 ) -> Result<()> {
     use futures::StreamExt;
     use std::collections::HashMap;
@@ -504,13 +675,18 @@ async fn process_message_stream_task<S: Storage + 'static>(
         .context("Failed to get message history")?;
 
     // Convert storage messages to LLM messages
-    let mut llm_messages: Vec<ChatMessage> = history
-        .iter()
-        .map(|msg| ChatMessage {
-            role: msg.role.clone(),
-            content: msg.content.clone(),
-        })
-        .collect();
+    // Build dynamic system prompt
+    let system_prompt = SystemPromptBuilder::new(workspace, tools.clone()).build();
+
+    let mut llm_messages: Vec<ChatMessage> = vec![ChatMessage {
+        role: "system".to_string(),
+        content: system_prompt,
+    }];
+    
+    llm_messages.extend(history.iter().map(|msg| ChatMessage {
+        role: msg.role.clone(),
+        content: msg.content.clone(),
+    }));
 
     tracing::info!(
         "Starting streaming for session {}: {} messages in context, {} tools available",

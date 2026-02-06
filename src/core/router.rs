@@ -1,22 +1,38 @@
 use crate::config::Config;
+use crate::config::workspace::Workspace;
 use crate::core::{MessageResponse, PairingManager, SessionManager};
 use crate::llm::Client as LlmClient;
 use crate::storage::Storage;
 use anyhow::Result;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Main router for handling incoming messages from all channels
 #[derive(Clone)]
 pub struct Router<S: Storage> {
     #[allow(dead_code)]
-    config: Config,
+    config: Arc<RwLock<Config>>,
     session_manager: SessionManager<S>,
     pub pairing_manager: PairingManager<S>,
 }
 
 impl<S: Storage + 'static> Router<S> {
-    pub fn new(config: Config, storage: S, llm_client: LlmClient) -> Self {
+    pub async fn new(config: Arc<RwLock<Config>>, storage: S, llm_client: LlmClient) -> Self {
+        // Read initial config for workspace setup
+        let (workspace_path, _sessions_config, _agents_config) = {
+            let cfg = config.read().await; // Use async read
+            (cfg.workspace.path.clone(), cfg.sessions.clone(), cfg.agents.clone())
+        };
+
+        let workspace = Workspace::new(workspace_path);
+        
+        // Initialize workspace with default files if needed
+        if let Err(e) = workspace.init_default() {
+            tracing::warn!("Failed to initialize workspace: {}", e);
+        }
+
         let session_manager =
-            SessionManager::new(storage.clone(), config.sessions.clone(), llm_client);
+            SessionManager::new(storage.clone(), config.clone(), llm_client, workspace);
         let pairing_manager = PairingManager::new(storage);
 
         Self {
@@ -24,6 +40,26 @@ impl<S: Storage + 'static> Router<S> {
             session_manager,
             pairing_manager,
         }
+    }
+
+    pub fn config(&self) -> Arc<RwLock<Config>> {
+        self.config.clone()
+    }
+
+    pub fn workspace(&self) -> &crate::config::workspace::Workspace {
+        self.session_manager.workspace()
+    }
+
+    /// Resolve agent ID based on user and channel
+    async fn resolve_agent(&self, user_id: &str, channel: &str) -> Option<String> {
+        let config = self.config.read().await;
+        for (agent_id, agent_config) in &config.agents {
+            // Check if this agent claims this channel or user
+            if agent_config.channels.iter().any(|c| c == channel || c == user_id) {
+                return Some(agent_id.clone());
+            }
+        }
+        None
     }
 
     /// Handle an incoming message from a user
@@ -35,16 +71,20 @@ impl<S: Storage + 'static> Router<S> {
     ) -> Result<MessageResponse> {
         tracing::debug!("Handling message from user {} on {}", user_id, channel);
 
+        // Resolve agent
+        let agent_id = self.resolve_agent(user_id, channel).await;
+        let agent_id_ref = agent_id.as_deref();
+
         // Get or create session
         let session = self
             .session_manager
-            .get_or_create_session(user_id, channel)
+            .get_or_create_session(user_id, channel, agent_id_ref)
             .await?;
 
         // Process message (SessionManager handles LLM interaction)
         let response = self
             .session_manager
-            .process_message(&session.id, content)
+            .process_message(&session.id, content, agent_id_ref)
             .await?;
 
         tracing::info!(
@@ -59,9 +99,12 @@ impl<S: Storage + 'static> Router<S> {
 
     /// Clear a user's session (reset conversation)
     pub async fn clear_session(&self, user_id: &str, channel: &str) -> Result<()> {
+        let agent_id = self.resolve_agent(user_id, channel).await;
+        let agent_id_ref = agent_id.as_deref();
+
         let session = self
             .session_manager
-            .get_or_create_session(user_id, channel)
+            .get_or_create_session(user_id, channel, agent_id_ref)
             .await?;
 
         self.session_manager.clear_session(&session.id).await
@@ -73,9 +116,12 @@ impl<S: Storage + 'static> Router<S> {
         user_id: &str,
         channel: &str,
     ) -> Result<crate::core::SessionStats> {
+        let agent_id = self.resolve_agent(user_id, channel).await;
+        let agent_id_ref = agent_id.as_deref();
+
         let session = self
             .session_manager
-            .get_or_create_session(user_id, channel)
+            .get_or_create_session(user_id, channel, agent_id_ref)
             .await?;
 
         self.session_manager.get_session_stats(&session.id).await
@@ -87,8 +133,11 @@ impl<S: Storage + 'static> Router<S> {
         user_id: &str,
         channel: &str,
     ) -> Result<crate::core::Session> {
+        let agent_id = self.resolve_agent(user_id, channel).await;
+        let agent_id_ref = agent_id.as_deref();
+
         self.session_manager
-            .get_or_create_session(user_id, channel)
+            .get_or_create_session(user_id, channel, agent_id_ref)
             .await
     }
 
@@ -107,13 +156,16 @@ impl<S: Storage + 'static> Router<S> {
         channel: &str,
         content: &str,
     ) -> Result<tokio::sync::mpsc::Receiver<crate::core::StreamEvent>> {
+        let agent_id = self.resolve_agent(user_id, channel).await;
+        let agent_id_ref = agent_id.as_deref();
+
         let session = self
             .session_manager
-            .get_or_create_session(user_id, channel)
+            .get_or_create_session(user_id, channel, agent_id_ref)
             .await?;
 
         self.session_manager
-            .process_message_stream(&session.id, content)
+            .process_message_stream(&session.id, content, agent_id_ref)
             .await
     }
 }

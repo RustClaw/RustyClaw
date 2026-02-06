@@ -1,4 +1,6 @@
 mod pairing;
+pub mod memory;
+pub mod prompt;
 mod router;
 mod session;
 

@@ -1,8 +1,12 @@
 pub mod auth;
+pub mod config;
 pub mod error;
 pub mod response;
 pub mod routes;
 pub mod websocket;
+pub mod workspace;
+
+
 
 use crate::core::Router;
 use crate::storage::Storage;
@@ -163,6 +167,25 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             .route(
                 &format!("{}/tools/definitions/all", self.api_path),
                 get(routes::get_all_tool_definitions),
+            )
+            // Config endpoints
+            .route(
+                &format!("{}/config", self.api_path),
+                get(config::get_config).patch(config::patch_config),
+            )
+            .route(
+                &format!("{}/agents", self.api_path),
+                get(config::get_agents),
+            )
+            // Workspace endpoints
+            .route(
+                &format!("{}/workspace", self.api_path),
+                get(workspace::list_workspace_files),
+            )
+            .route(
+                &format!("{}/workspace/:file_type", self.api_path),
+                get(workspace::get_workspace_file)
+                    .put(workspace::update_workspace_file),
             )
             // MCP Endpoints
             .route("/mcp/sse", get(sse_handler))

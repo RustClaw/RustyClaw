@@ -1,6 +1,7 @@
 pub mod creator;
 pub mod exec;
 pub mod executor;
+pub mod memory;
 pub mod policy;
 pub mod skill_watcher;
 pub mod skills;
@@ -15,4 +16,5 @@ pub use skills::{execute_skill, get_skill, list_skills, load_skill, unload_skill
 pub use whatsapp::{
     get_whatsapp_tool_definitions, list_whatsapp_accounts, list_whatsapp_groups, send_whatsapp,
 };
+pub use memory::{execute_memory_tool, get_memory_tool_definitions};
 pub mod web;

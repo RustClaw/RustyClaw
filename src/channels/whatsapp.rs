@@ -734,29 +734,36 @@ mod tests {
             account_id: Some("test".to_string()),
         };
 
-        let mock_router = Arc::new(crate::core::Router::new(
-            crate::Config {
-                gateway: Default::default(),
-                llm: crate::config::LlmConfig {
-                    provider: "test".to_string(),
-                    base_url: "http://localhost".to_string(),
-                    models: crate::config::LlmModels {
-                        primary: "test".to_string(),
-                        code: None,
-                        fast: None,
-                    },
-                    keep_alive: None,
-                    cache: Default::default(),
-                    routing: None,
+        let full_config = crate::Config {
+            gateway: Default::default(),
+            llm: crate::config::LlmConfig {
+                provider: "test".to_string(),
+                base_url: "http://localhost".to_string(),
+                models: crate::config::LlmModels {
+                    primary: "test".to_string(),
+                    code: None,
+                    fast: None,
                 },
-                channels: Default::default(),
-                sessions: Default::default(),
-                storage: Default::default(),
-                logging: Default::default(),
-                sandbox: Default::default(),
-                tools: Default::default(),
-                api: Default::default(),
+                keep_alive: None,
+                cache: Default::default(),
+                routing: None,
             },
+            channels: Default::default(),
+            sessions: Default::default(),
+            storage: Default::default(),
+            logging: Default::default(),
+            sandbox: Default::default(),
+            tools: Default::default(),
+            api: Default::default(),
+            workspace: Default::default(),
+            agents: Default::default(),
+            config_path: None,
+        };
+
+        let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(full_config));
+
+        let mock_router = Arc::new(crate::core::Router::new(
+            shared_config,
             MockStorage::new(),
             crate::llm::Client::new(&crate::config::LlmConfig {
                 provider: "test".to_string(),
@@ -771,7 +778,7 @@ mod tests {
                 routing: None,
             })
             .unwrap(),
-        ));
+        ).await);
 
         let adapter = WhatsAppAdapter::new(mock_router, config).unwrap();
         assert!(adapter.is_enabled());

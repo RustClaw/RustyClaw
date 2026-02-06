@@ -16,8 +16,18 @@ pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config> {
 
     // Validate configuration
     validate_config(&config)?;
+    
+    let mut config = config;
+    config.config_path = Some(path.to_path_buf());
 
     Ok(config)
+}
+
+pub fn save_config(config: &Config) -> Result<()> {
+    let path = config.config_path.as_ref().context("No config path set")?;
+    let content = serde_yaml::to_string(config)?;
+    fs::write(path, content)?;
+    Ok(())
 }
 
 fn substitute_env_vars(mut config: Config) -> Result<Config> {

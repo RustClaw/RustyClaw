@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
@@ -26,6 +27,8 @@ impl Default for ApiConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
     #[serde(default)]
     pub gateway: GatewayConfig,
     pub llm: LlmConfig,
@@ -43,6 +46,20 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub api: ApiConfig,
+    #[serde(default)]
+    pub workspace: WorkspaceConfig,
+    #[serde(default)]
+    pub agents: HashMap<String, AgentConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    pub name: String,
+    /// Custom workspace path (overrides default)
+    pub workspace: Option<PathBuf>,
+    /// List of channel identifiers this agent handles (e.g. phone numbers)
+    #[serde(default)]
+    pub channels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,11 +190,19 @@ pub struct WhatsAppChannelConfig {
 pub struct SessionsConfig {
     #[serde(default = "default_scope")]
     pub scope: String,
+    /// Max tokens before rolling window or compaction logic kicks in
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
+    /// Enable smart session compaction (summarization using LLM)
+    #[serde(default = "default_compaction_enabled")]
+    pub compaction_enabled: bool,
     /// Channel routing mode: isolated, shared, or bridged
     #[serde(default = "default_channel_routing")]
     pub channel_routing: String,
+}
+
+fn default_compaction_enabled() -> bool {
+    false
 }
 
 /// Channel routing modes for cross-channel context sharing
@@ -197,6 +222,7 @@ impl Default for SessionsConfig {
         Self {
             scope: default_scope(),
             max_tokens: default_max_tokens(),
+            compaction_enabled: default_compaction_enabled(),
             channel_routing: default_channel_routing(),
         }
     }
@@ -232,6 +258,26 @@ impl Default for LoggingConfig {
         Self {
             level: default_log_level(),
             format: default_log_format(),
+        }
+    }
+}
+
+/// Workspace configuration for dynamic system prompts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    /// Path to the workspace directory containing markdown files
+    #[serde(default = "default_workspace_path")]
+    pub path: PathBuf,
+    /// Maximum characters to inject from bootstrap files
+    #[serde(default = "default_bootstrap_max_chars")]
+    pub bootstrap_max_chars: usize,
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            path: default_workspace_path(),
+            bootstrap_max_chars: default_bootstrap_max_chars(),
         }
     }
 }
@@ -294,6 +340,16 @@ fn default_max_models() -> usize {
 
 fn default_eviction() -> String {
     "lru".to_string()
+}
+
+fn default_workspace_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|h: PathBuf| h.join(".rustyclaw").join("workspace"))
+        .unwrap_or_else(|| PathBuf::from("./workspace"))
+}
+
+fn default_bootstrap_max_chars() -> usize {
+    20000
 }
 
 fn default_self_chat_mode() -> bool {

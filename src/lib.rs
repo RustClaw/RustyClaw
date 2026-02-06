@@ -162,7 +162,8 @@ pub async fn run(config: Config) -> Result<()> {
     tracing::info!("LLM client initialized: {}", config.llm.base_url);
 
     // Initialize router
-    let router = Router::new(config.clone(), storage.clone(), llm_client);
+    let shared_config = Arc::new(tokio::sync::RwLock::new(config.clone()));
+    let router = Router::new(shared_config, storage.clone(), llm_client).await;
     tracing::info!("Router initialized");
 
     // Check if initial setup is needed

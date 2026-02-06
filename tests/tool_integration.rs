@@ -2,6 +2,9 @@ use rustyclaw::config::{LlmConfig, LlmModels};
 use rustyclaw::core::SessionManager;
 use rustyclaw::llm::Client as LlmClient;
 use rustyclaw::storage::sqlite::SqliteStorage;
+use rustyclaw::config::workspace::Workspace;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 fn mock_llm_config() -> LlmConfig {
     LlmConfig {
@@ -26,9 +29,30 @@ async fn test_available_tools_include_creator_and_web() {
     let llm_client = LlmClient::new(&llm_config).unwrap();
 
     // Config struct itself doesn't have Default, but its components do
-    let sessions_config = rustyclaw::config::SessionsConfig::default();
+    let sessions_config = rustyclaw::config::SessionsConfig {
+        compaction_enabled: false,
+        ..Default::default()
+    };
+    
+    let config = rustyclaw::config::Config {
+        llm: llm_config,
+        sessions: sessions_config,
+        gateway: Default::default(),
+        channels: Default::default(),
+        storage: Default::default(),
+        logging: Default::default(),
+        sandbox: Default::default(),
+        tools: Default::default(),
+        api: Default::default(),
+        workspace: Default::default(),
+        agents: Default::default(),
+        config_path: None,
+    };
+    
+    let shared_config = Arc::new(RwLock::new(config));
+    let workspace = Workspace::new(std::env::temp_dir().join("tool_test_workspace"));
 
-    let session_manager = SessionManager::new(storage, sessions_config, llm_client);
+    let session_manager = SessionManager::new(storage, shared_config, llm_client, workspace);
 
     // Initialize the plugin registry for the test
     rustyclaw::plugins::init_plugin_registry();

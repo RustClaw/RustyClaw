@@ -4,6 +4,9 @@ use rustyclaw::config::{
 use rustyclaw::core::{Router, SessionManager};
 use rustyclaw::llm::Client as LlmClient;
 use rustyclaw::storage::sqlite::SqliteStorage;
+use rustyclaw::config::workspace::Workspace;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Test full session integration with LLM
 #[tokio::test]
@@ -51,21 +54,40 @@ async fn test_session_conversation_flow() {
     let sessions_config = SessionsConfig {
         scope: "per-sender".to_string(),
         max_tokens: 128000,
+        compaction_enabled: false,
         channel_routing: "isolated".to_string(),
     };
 
-    let session_manager = SessionManager::new(storage.clone(), sessions_config, llm_client);
+    let full_config = rustyclaw::config::Config {
+        gateway: Default::default(),
+        llm: llm_config,
+        channels: Default::default(),
+        sessions: sessions_config,
+        storage: Default::default(),
+        logging: Default::default(),
+        sandbox: Default::default(),
+        tools: Default::default(),
+        api: Default::default(),
+        workspace: Default::default(),
+        agents: Default::default(),
+        config_path: None,
+    };
+    
+    let shared_config = Arc::new(RwLock::new(full_config));
+    let workspace = Workspace::new(std::env::temp_dir().join("workspace"));
+
+    let session_manager = SessionManager::new(storage.clone(), shared_config, llm_client, workspace);
 
     // Test 1: Create session and send first message
     let session = session_manager
-        .get_or_create_session("user123", "telegram")
+        .get_or_create_session("user123", "telegram", None)
         .await
         .expect("Failed to create session");
 
     println!("✓ Session created: {}", session.id);
 
     let response1 = session_manager
-        .process_message(&session.id, "Hello! What's your name?")
+        .process_message(&session.id, "Hello! What's your name?", None)
         .await
         .expect("Failed to process message 1");
 
@@ -80,7 +102,7 @@ async fn test_session_conversation_flow() {
 
     // Test 2: Send follow-up message (context preserved)
     let response2 = session_manager
-        .process_message(&session.id, "Can you remember what I just asked you?")
+        .process_message(&session.id, "Can you remember what I just asked you?", None)
         .await
         .expect("Failed to process message 2");
 
@@ -99,7 +121,7 @@ async fn test_session_conversation_flow() {
 
     // Test 3: Test model routing with code task
     let response3 = session_manager
-        .process_message(&session.id, "Write a function to add two numbers")
+        .process_message(&session.id, "Write a function to add two numbers", None)
         .await
         .expect("Failed to process message 3");
 
@@ -190,6 +212,7 @@ async fn test_router_conversation() {
         sessions: SessionsConfig {
             scope: "per-sender".to_string(),
             max_tokens: 128000,
+            compaction_enabled: false,
             channel_routing: "isolated".to_string(),
         },
         storage: Default::default(),
@@ -197,9 +220,13 @@ async fn test_router_conversation() {
         sandbox: Default::default(),
         tools: Default::default(),
         api: Default::default(),
+        workspace: Default::default(),
+        agents: Default::default(),
+        config_path: None,
     };
 
-    let router = Router::new(config, storage, llm_client);
+    let shared_config = Arc::new(RwLock::new(config));
+    let router = Router::new(shared_config, storage, llm_client).await;
 
     // Test conversation through router
     let response1 = router

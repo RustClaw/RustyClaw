@@ -144,6 +144,20 @@ pub async fn execute_tool_with_context(
                 .context("Failed to parse web_search parameters")?;
             super::web::web_search(params).await
         }
+        "append_memory" | "read_today_memory" => {
+            // Construct workspace from default path or context
+            // For now using default path logic duplicated from default_workspace_path
+            let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+            let workspace_path = home.join(".rustyclaw").join("workspace");
+            let workspace = crate::config::workspace::Workspace::new(workspace_path);
+            
+            let args_json: serde_json::Value = serde_json::from_str(&effective_arguments)
+                .unwrap_or(serde_json::Value::Null);
+                
+            super::memory::execute_memory_tool(name, &args_json, &workspace)
+                .await
+                .map(|opt| opt.unwrap_or_default())
+        }
         _ => {
             // Try to find in skills registry
             if super::skills::get_skill(name).await.is_some() {
