@@ -40,6 +40,22 @@ impl ToolRegistry {
         Ok(())
     }
 
+    /// Unregister a tool by name
+    pub fn unregister_tool(&self, name: &str) -> Result<()> {
+        debug!("Unregistering tool: {}", name);
+
+        let mut tools = self
+            .static_tools
+            .lock()
+            .map_err(|e| anyhow!("Failed to acquire tool registry lock: {}", e))?;
+
+        if tools.remove(name).is_some() {
+            Ok(())
+        } else {
+            Err(anyhow!("Tool '{}' not found", name))
+        }
+    }
+
     /// Register a tool factory for context-aware tools
     pub fn register_tool_factory(&self, factory: ToolFactory) -> Result<()> {
         debug!("Registering tool factory");

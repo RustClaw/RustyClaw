@@ -278,19 +278,23 @@ impl<S: Storage + 'static> SessionManager<S> {
                 for tool_call in tool_calls {
                     tracing::info!("Executing tool: {}", tool_call.name);
 
-                    let result =
-                        match crate::tools::execute_tool(&tool_call.name, &tool_call.arguments)
-                            .await
-                        {
-                            Ok(result) => {
-                                tracing::info!("Tool {} succeeded", tool_call.name);
-                                result
-                            }
-                            Err(err) => {
-                                tracing::error!("Tool {} failed: {}", tool_call.name, err);
-                                format!("Error: {}", err)
-                            }
-                        };
+                    let result = match crate::tools::executor::execute_tool_with_context(
+                        &tool_call.name,
+                        &tool_call.arguments,
+                        Some(session_id),
+                        true, // In session manager, this is usually the main session
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            tracing::info!("Tool {} succeeded", tool_call.name);
+                            result
+                        }
+                        Err(err) => {
+                            tracing::error!("Tool {} failed: {}", tool_call.name, err);
+                            format!("Error: {}", err)
+                        }
+                    };
 
                     // Add tool result to message history
                     llm_messages.push(ChatMessage {
@@ -326,7 +330,7 @@ impl<S: Storage + 'static> SessionManager<S> {
     }
 
     /// Get available tools for this session
-    async fn get_available_tools(&self) -> Vec<ToolDefinition> {
+    pub async fn get_available_tools(&self) -> Vec<ToolDefinition> {
         let mut tools = Vec::new();
 
         // Helper function to extract tool definition from JSON
@@ -345,6 +349,22 @@ impl<S: Storage + 'static> SessionManager<S> {
         // 1. Add exec tools (always available)
         let exec_defs = crate::tools::get_exec_tool_definitions();
         for def in exec_defs {
+            if let Some(tool) = extract_tool(&def) {
+                tools.push(tool);
+            }
+        }
+
+        // 1b. Add creator tools (always available)
+        let creator_defs = crate::tools::get_creator_tool_definitions();
+        for def in creator_defs {
+            if let Some(tool) = extract_tool(&def) {
+                tools.push(tool);
+            }
+        }
+
+        // 1c. Add web tools (always available)
+        let web_defs = crate::tools::web::get_web_tool_definitions();
+        for def in web_defs {
             if let Some(tool) = extract_tool(&def) {
                 tools.push(tool);
             }
@@ -630,17 +650,23 @@ async fn process_message_stream_task<S: Storage + 'static>(
                 }
 
                 // Execute tool
-                let result =
-                    match crate::tools::execute_tool(&tool_call.name, &tool_call.arguments).await {
-                        Ok(result) => {
-                            tracing::info!("Tool {} succeeded", tool_call.name);
-                            result
-                        }
-                        Err(err) => {
-                            tracing::error!("Tool {} failed: {}", tool_call.name, err);
-                            format!("Error: {}", err)
-                        }
-                    };
+                let result = match crate::tools::executor::execute_tool_with_context(
+                    &tool_call.name,
+                    &tool_call.arguments,
+                    Some(&session_id),
+                    true,
+                )
+                .await
+                {
+                    Ok(result) => {
+                        tracing::info!("Tool {} succeeded", tool_call.name);
+                        result
+                    }
+                    Err(err) => {
+                        tracing::error!("Tool {} failed: {}", tool_call.name, err);
+                        format!("Error: {}", err)
+                    }
+                };
 
                 // Send tool end event
                 if tx

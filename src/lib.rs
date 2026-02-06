@@ -134,6 +134,10 @@ pub async fn run(config: Config) -> Result<()> {
     TOOL_POLICY_ENGINE.set(Arc::new(policy_engine)).ok();
     tracing::info!("✅ Tool policy engine initialized");
 
+    // Initialize plugin registry
+    let _plugin_registry = plugins::init_plugin_registry();
+    tracing::info!("✅ Plugin registry initialized");
+
     // Initialize and start skill watcher if enabled
     if config.tools.skills_enabled {
         let skills_dir = config.tools.skills_dir.clone();

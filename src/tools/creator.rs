@@ -220,6 +220,75 @@ pub async fn handle_delete_tool(name: String) -> Result<String> {
     Ok(format!("✓ Tool '{}' deleted successfully.", name))
 }
 
+/// Get tool definitions for tool creation tools
+pub fn get_creator_tool_definitions() -> Vec<serde_json::Value> {
+    use serde_json::json;
+    vec![
+        json!({
+            "type": "function",
+            "function": {
+                "name": "create_tool",
+                "description": "Create a new persistent tool/capability for yourself. This tool will be saved and available in future sessions. You can write the tool logic in Bash or Python.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Unique name for the tool (alphanumeric + underscores/hyphens)"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Clear description of what the tool does and how to use it"
+                        },
+                        "runtime": {
+                            "type": "string",
+                            "enum": ["bash", "python"],
+                            "description": "The runtime to use for the tool"
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "The executable script content"
+                        },
+                        "parameters": {
+                            "type": "object",
+                            "description": "JSON Schema for the tool's input parameters. Must include a 'type' field (usually 'object') and 'properties'."
+                        },
+                        "policy": {
+                            "type": "string",
+                            "enum": ["allow", "elevated"],
+                            "description": "Access policy. 'allow' for standard tools, 'elevated' for dangerous tools.",
+                            "default": "allow"
+                        },
+                        "sandbox": {
+                            "type": "boolean",
+                            "description": "Whether to run the tool in a Docker sandbox",
+                            "default": true
+                        }
+                    },
+                    "required": ["name", "description", "runtime", "body", "parameters"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "delete_tool",
+                "description": "Permanently delete a tool you created. Use this to clean up failed experiments or outdated tools.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the tool to delete"
+                        }
+                    },
+                    "required": ["name"]
+                }
+            }
+        }),
+    ]
+}
+
 // Syntax validators
 
 fn validate_bash_syntax(body: &str) -> Result<()> {

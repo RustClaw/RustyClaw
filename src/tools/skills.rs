@@ -121,6 +121,37 @@ pub async fn load_skill(entry: SkillEntry) -> Result<()> {
         }
     }
 
+    // Register in plugin registry for better integration
+    if let Some(registry) = crate::plugins::get_plugin_registry() {
+        let name_clone = skill_name.clone();
+        let tool = crate::plugins::traits::Tool {
+            name: skill_name.clone(),
+            description: entry.manifest.description.clone(),
+            parameters: entry.manifest.parameters.clone(),
+            execute: Arc::new(move |args| {
+                let name = name_clone.clone();
+                Box::pin(async move {
+                    match execute_skill(&name, &args).await {
+                        Ok(content) => Ok(crate::plugins::traits::ToolResult {
+                            content,
+                            details: None,
+                            success: true,
+                        }),
+                        Err(e) => Ok(crate::plugins::traits::ToolResult {
+                            content: format!("Error: {}", e),
+                            details: None,
+                            success: false,
+                        }),
+                    }
+                })
+            }),
+        };
+
+        if let Err(e) = registry.tools.register_tool(tool) {
+            tracing::error!("Failed to register skill '{}' in plugin registry: {}", skill_name, e);
+        }
+    }
+
     info!("Loaded skill: '{}'", skill_name);
     Ok(())
 }
@@ -132,6 +163,12 @@ pub async fn unload_skill(name: &str) -> Result<()> {
         let mut skills = registry.write().await;
         skills.remove(name);
     }
+
+    // Unregister from plugin registry
+    if let Some(registry) = crate::plugins::get_plugin_registry() {
+        let _ = registry.tools.unregister_tool(name);
+    }
+
     info!("Unloaded skill: '{}'", name);
     Ok(())
 }

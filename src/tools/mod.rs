@@ -6,7 +6,7 @@ pub mod skill_watcher;
 pub mod skills;
 pub mod whatsapp;
 
-pub use creator::CreateToolRequest;
+pub use creator::{get_creator_tool_definitions, CreateToolRequest};
 pub use exec::{exec_bash, exec_command, get_exec_tool_definitions};
 pub use executor::execute_tool;
 pub use policy::ToolPolicyEngine;
