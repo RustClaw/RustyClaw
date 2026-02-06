@@ -203,8 +203,6 @@ impl Client {
         &self.config.models.primary
     }
 
-
-
     /// Route a message to the appropriate model based on content
     pub fn route_model(&self, content: &str) -> &str {
         self.router.route(content)

@@ -1,10 +1,10 @@
+use axum::extract::State;
+use axum::Json;
 use rustyclaw::api::config::patch_config;
 use rustyclaw::config::{Config, SessionsConfig};
 use rustyclaw::core::Router;
-use rustyclaw::storage::sqlite::SqliteStorage;
 use rustyclaw::llm::Client as LlmClient;
-use axum::extract::State;
-use axum::Json;
+use rustyclaw::storage::sqlite::SqliteStorage;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -15,7 +15,9 @@ async fn test_patch_config() {
     let test_config_path = std::env::temp_dir().join("rustyclaw_test_config.yaml");
     let _ = tokio::fs::remove_file(&test_config_path).await;
 
-    let storage = SqliteStorage::new(":memory:").await.expect("Failed to create storage");
+    let storage = SqliteStorage::new(":memory:")
+        .await
+        .expect("Failed to create storage");
 
     // Create minimal valid config
     let initial_config = Config {
@@ -50,12 +52,15 @@ async fn test_patch_config() {
     };
 
     // Save initial config to disk so save() works
-    initial_config.save().expect("Failed to save initial config");
+    initial_config
+        .save()
+        .expect("Failed to save initial config");
 
     let shared_config = Arc::new(RwLock::new(initial_config));
-    
+
     // We need an LlmClient for Router (mock/dummy)
-    let llm_client = LlmClient::new(&shared_config.read().await.llm).expect("Failed to create LLM client");
+    let llm_client =
+        LlmClient::new(&shared_config.read().await.llm).expect("Failed to create LLM client");
 
     let router = Router::new(shared_config.clone(), storage, llm_client).await;
     let router_arc = Arc::new(router);
@@ -77,7 +82,9 @@ async fn test_patch_config() {
     }
 
     // Verify persistence
-    let saved_content = tokio::fs::read_to_string(&test_config_path).await.expect("Failed to read config file");
+    let saved_content = tokio::fs::read_to_string(&test_config_path)
+        .await
+        .expect("Failed to read config file");
     assert!(saved_content.contains("compaction_enabled: true"));
 
     // Test 2: Patch nested agents (add an agent)

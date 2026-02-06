@@ -1,10 +1,10 @@
+use rustyclaw::config::workspace::Workspace;
 use rustyclaw::config::{
     CacheConfig, LlmConfig, LlmModels, RoutingConfig, RoutingRule, SessionsConfig,
 };
 use rustyclaw::core::{Router, SessionManager};
 use rustyclaw::llm::Client as LlmClient;
 use rustyclaw::storage::sqlite::SqliteStorage;
-use rustyclaw::config::workspace::Workspace;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -72,11 +72,12 @@ async fn test_session_conversation_flow() {
         agents: Default::default(),
         config_path: None,
     };
-    
+
     let shared_config = Arc::new(RwLock::new(full_config));
     let workspace = Workspace::new(std::env::temp_dir().join("workspace"));
 
-    let session_manager = SessionManager::new(storage.clone(), shared_config, llm_client, workspace);
+    let session_manager =
+        SessionManager::new(storage.clone(), shared_config, llm_client, workspace);
 
     // Test 1: Create session and send first message
     let session = session_manager

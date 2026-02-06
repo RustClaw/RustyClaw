@@ -1,10 +1,10 @@
-use crate::core::Router;
 use crate::config::workspace::WorkspaceFile;
+use crate::core::Router;
 use crate::storage::Storage;
 use axum::{
     extract::{Path, State},
-    Json,
     http::StatusCode,
+    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -54,7 +54,9 @@ pub async fn get_workspace_file<S: Storage + 'static>(
         _ => return Err(StatusCode::NOT_FOUND),
     };
 
-    let content = router.workspace().load_file(workspace_file)
+    let content = router
+        .workspace()
+        .load_file(workspace_file)
         .unwrap_or_default();
 
     Ok(Json(WorkspaceFileResponse { content }))
@@ -78,7 +80,10 @@ pub async fn update_workspace_file<S: Storage + 'static>(
     // Note: Workspace currently only supports load_file, need to add save_file
     // For now, assuming save_file exists or will be added.
     // I need to add save_file to Workspace struct first!
-    if let Err(e) = router.workspace().save_file(workspace_file, &request.content) {
+    if let Err(e) = router
+        .workspace()
+        .save_file(workspace_file, &request.content)
+    {
         tracing::error!("Failed to save workspace file: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }

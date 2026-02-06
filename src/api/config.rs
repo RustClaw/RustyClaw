@@ -1,10 +1,10 @@
-use crate::core::Router;
-use crate::config::Config;
-use crate::storage::Storage;
 use crate::api::ApiError;
+use crate::config::Config;
+use crate::core::Router;
+use crate::storage::Storage;
 use axum::{extract::State, Json};
-use std::sync::Arc;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// Get current configuration
 pub async fn get_config<S: Storage + 'static>(
@@ -26,7 +26,9 @@ pub async fn get_agents<S: Storage + 'static>(
 ) -> Json<Vec<AgentSummary>> {
     let config_arc = router.config();
     let config = config_arc.read().await;
-    let agents = config.agents.iter()
+    let agents = config
+        .agents
+        .iter()
         .map(|(id, cfg)| AgentSummary {
             id: id.clone(),
             name: cfg.name.clone(),
@@ -43,28 +45,30 @@ pub async fn patch_config<S: Storage + 'static>(
 ) -> Result<Json<Config>, ApiError> {
     let config_arc = router.config();
     let mut config_guard = config_arc.write().await;
-    
+
     // Convert current config to Value
-    let mut config_value = serde_json::to_value(&*config_guard)
-        .map_err(|e| ApiError::InternalError(format!("Failed to serialize current config: {}", e)))?;
-        
+    let mut config_value = serde_json::to_value(&*config_guard).map_err(|e| {
+        ApiError::InternalError(format!("Failed to serialize current config: {}", e))
+    })?;
+
     // Merge patch
     json_merge(&mut config_value, patch);
-    
+
     // Deserialize back to Config
     let mut new_config: Config = serde_json::from_value(config_value)
         .map_err(|e| ApiError::BadRequest(format!("Invalid configuration: {}", e)))?;
-        
+
     // Restore config_path (skipped during serialization)
     new_config.config_path = config_guard.config_path.clone();
-    
+
     // Update guard
     *config_guard = new_config;
-    
+
     // Save to disk
-    config_guard.save()
+    config_guard
+        .save()
         .map_err(|e| ApiError::InternalError(format!("Failed to save config: {}", e)))?;
-        
+
     Ok(Json(config_guard.clone()))
 }
 

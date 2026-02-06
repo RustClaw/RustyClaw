@@ -150,10 +150,10 @@ pub async fn execute_tool_with_context(
             let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
             let workspace_path = home.join(".rustyclaw").join("workspace");
             let workspace = crate::config::workspace::Workspace::new(workspace_path);
-            
-            let args_json: serde_json::Value = serde_json::from_str(&effective_arguments)
-                .unwrap_or(serde_json::Value::Null);
-                
+
+            let args_json: serde_json::Value =
+                serde_json::from_str(&effective_arguments).unwrap_or(serde_json::Value::Null);
+
             super::memory::execute_memory_tool(name, &args_json, &workspace)
                 .await
                 .map(|opt| opt.unwrap_or_default())

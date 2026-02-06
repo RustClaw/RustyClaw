@@ -1,5 +1,5 @@
-mod pairing;
 pub mod memory;
+mod pairing;
 pub mod prompt;
 mod router;
 mod session;

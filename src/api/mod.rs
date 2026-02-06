@@ -6,8 +6,6 @@ pub mod routes;
 pub mod websocket;
 pub mod workspace;
 
-
-
 use crate::core::Router;
 use crate::storage::Storage;
 use anyhow::{Context, Result};
@@ -184,8 +182,7 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             )
             .route(
                 &format!("{}/workspace/:file_type", self.api_path),
-                get(workspace::get_workspace_file)
-                    .put(workspace::update_workspace_file),
+                get(workspace::get_workspace_file).put(workspace::update_workspace_file),
             )
             // MCP Endpoints
             .route("/mcp/sse", get(sse_handler))

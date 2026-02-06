@@ -3,10 +3,10 @@
 //! Handles daily logs (short-term) and curated memory (long-term).
 //! Memories are stored in markdown files within the workspace.
 
-use std::fs;
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::Local;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct MemoryManager {
@@ -59,25 +59,25 @@ impl MemoryManager {
     /// Append content to today's memory log
     pub fn append_memory(&self, content: &str) -> Result<()> {
         self.ensure_memory_dir()?;
-        
+
         let path = self.today_log_path();
         let timestamp = Local::now().format("%H:%M:%S");
-        
+
         // Append or create
         let entry = format!("\n[{}] {}\n", timestamp, content.trim());
-        
+
         // Usage of OpenOptions to append
         use std::fs::OpenOptions;
         use std::io::Write;
-        
+
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
             .context("Failed to open daily memory log")?;
-            
+
         file.write_all(entry.as_bytes())?;
-        
+
         tracing::info!("Appended to memory log: {}", path.display());
         Ok(())
     }

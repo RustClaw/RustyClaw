@@ -16,7 +16,7 @@ pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config> {
 
     // Validate configuration
     validate_config(&config)?;
-    
+
     let mut config = config;
     config.config_path = Some(path.to_path_buf());
 

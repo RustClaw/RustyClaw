@@ -1,5 +1,5 @@
-use crate::config::Config;
 use crate::config::workspace::Workspace;
+use crate::config::Config;
 use crate::core::{MessageResponse, PairingManager, SessionManager};
 use crate::llm::Client as LlmClient;
 use crate::storage::Storage;
@@ -21,11 +21,15 @@ impl<S: Storage + 'static> Router<S> {
         // Read initial config for workspace setup
         let (workspace_path, _sessions_config, _agents_config) = {
             let cfg = config.read().await; // Use async read
-            (cfg.workspace.path.clone(), cfg.sessions.clone(), cfg.agents.clone())
+            (
+                cfg.workspace.path.clone(),
+                cfg.sessions.clone(),
+                cfg.agents.clone(),
+            )
         };
 
         let workspace = Workspace::new(workspace_path);
-        
+
         // Initialize workspace with default files if needed
         if let Err(e) = workspace.init_default() {
             tracing::warn!("Failed to initialize workspace: {}", e);
@@ -55,7 +59,11 @@ impl<S: Storage + 'static> Router<S> {
         let config = self.config.read().await;
         for (agent_id, agent_config) in &config.agents {
             // Check if this agent claims this channel or user
-            if agent_config.channels.iter().any(|c| c == channel || c == user_id) {
+            if agent_config
+                .channels
+                .iter()
+                .any(|c| c == channel || c == user_id)
+            {
                 return Some(agent_id.clone());
             }
         }

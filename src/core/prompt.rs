@@ -140,21 +140,21 @@ impl SystemPromptBuilder {
         use crate::core::memory::MemoryManager;
         // Create memory manager on the fly since it's just a path wrapper
         let memory_manager = MemoryManager::new(self.workspace.path());
-        
+
         let mut parts = Vec::new();
-        
+
         // Add curated memory
         if let Some(curated) = memory_manager.get_curated_memory() {
             parts.push(format!("## Long-Term Memory\n\n{}", curated));
         }
-        
+
         // Add daily log
         if let Ok(today) = memory_manager.get_today_log() {
             if !today.trim().is_empty() {
                 parts.push(format!("## Recent Memory (Today)\n{}", today));
             }
         }
-        
+
         if parts.is_empty() {
             None
         } else {

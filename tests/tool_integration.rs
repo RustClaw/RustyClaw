@@ -1,8 +1,8 @@
+use rustyclaw::config::workspace::Workspace;
 use rustyclaw::config::{LlmConfig, LlmModels};
 use rustyclaw::core::SessionManager;
 use rustyclaw::llm::Client as LlmClient;
 use rustyclaw::storage::sqlite::SqliteStorage;
-use rustyclaw::config::workspace::Workspace;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -33,7 +33,7 @@ async fn test_available_tools_include_creator_and_web() {
         compaction_enabled: false,
         ..Default::default()
     };
-    
+
     let config = rustyclaw::config::Config {
         llm: llm_config,
         sessions: sessions_config,
@@ -48,7 +48,7 @@ async fn test_available_tools_include_creator_and_web() {
         agents: Default::default(),
         config_path: None,
     };
-    
+
     let shared_config = Arc::new(RwLock::new(config));
     let workspace = Workspace::new(std::env::temp_dir().join("tool_test_workspace"));
 
