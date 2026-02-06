@@ -148,7 +148,11 @@ pub async fn load_skill(entry: SkillEntry) -> Result<()> {
         };
 
         if let Err(e) = registry.tools.register_tool(tool) {
-            tracing::error!("Failed to register skill '{}' in plugin registry: {}", skill_name, e);
+            tracing::error!(
+                "Failed to register skill '{}' in plugin registry: {}",
+                skill_name,
+                e
+            );
         }
     }
 

@@ -37,8 +37,13 @@ pub async fn execute_tool_with_context(
     let mut effective_arguments = arguments.to_string();
     if let Some(registry) = crate::plugins::get_plugin_registry() {
         let mut before_ctx = ctx.clone();
-        before_ctx.metadata.insert("tool_name".to_string(), serde_json::json!(name));
-        before_ctx.metadata.insert("parameters".to_string(), serde_json::from_str(arguments).unwrap_or(serde_json::Value::Null));
+        before_ctx
+            .metadata
+            .insert("tool_name".to_string(), serde_json::json!(name));
+        before_ctx.metadata.insert(
+            "parameters".to_string(),
+            serde_json::from_str(arguments).unwrap_or(serde_json::Value::Null),
+        );
 
         if let Ok(Some(modification)) = registry.hooks.run_before_tool_call(before_ctx).await {
             if let Some(block) = modification.block_tool {
@@ -97,8 +102,9 @@ pub async fn execute_tool_with_context(
             }
         }
         "send_whatsapp" => {
-            let params: whatsapp::SendWhatsAppParams = serde_json::from_str(&effective_arguments)
-                .context("Failed to parse send_whatsapp parameters")?;
+            let params: whatsapp::SendWhatsAppParams =
+                serde_json::from_str(&effective_arguments)
+                    .context("Failed to parse send_whatsapp parameters")?;
             whatsapp::send_whatsapp(params).await
         }
         "list_whatsapp_groups" => {
@@ -163,7 +169,7 @@ pub async fn execute_tool_with_context(
     // Run AfterToolCall hooks
     if let Some(registry) = crate::plugins::get_plugin_registry() {
         let mut after_ctx = ctx.clone();
-        
+
         let tool_result = match &result_content {
             Ok(content) => crate::plugins::traits::ToolResult {
                 content: content.clone(),
@@ -177,10 +183,20 @@ pub async fn execute_tool_with_context(
             },
         };
 
-        after_ctx.metadata.insert("tool_name".to_string(), serde_json::json!(name));
-        after_ctx.metadata.insert("parameters".to_string(), serde_json::from_str(&effective_arguments).unwrap_or(serde_json::Value::Null));
-        after_ctx.metadata.insert("result".to_string(), serde_json::to_value(tool_result).unwrap_or(serde_json::Value::Null));
-        after_ctx.metadata.insert("duration_ms".to_string(), serde_json::json!(duration_ms));
+        after_ctx
+            .metadata
+            .insert("tool_name".to_string(), serde_json::json!(name));
+        after_ctx.metadata.insert(
+            "parameters".to_string(),
+            serde_json::from_str(&effective_arguments).unwrap_or(serde_json::Value::Null),
+        );
+        after_ctx.metadata.insert(
+            "result".to_string(),
+            serde_json::to_value(tool_result).unwrap_or(serde_json::Value::Null),
+        );
+        after_ctx
+            .metadata
+            .insert("duration_ms".to_string(), serde_json::json!(duration_ms));
 
         let _ = registry.hooks.run_after_tool_call(after_ctx).await;
     }
