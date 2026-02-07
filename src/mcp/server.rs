@@ -252,7 +252,11 @@ impl McpServer {
         }
     }
 
-    async fn handle_create_tool(&self, id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
+    async fn handle_create_tool(
+        &self,
+        id: Option<Value>,
+        params: Option<Value>,
+    ) -> JsonRpcResponse {
         use crate::tools::creator::CreateToolRequest;
 
         let req: CreateToolRequest = match serde_json::from_value(params.unwrap_or(Value::Null)) {
@@ -270,9 +274,7 @@ impl McpServer {
                 });
                 JsonRpcResponse::success(id, response)
             }
-            Err(e) => {
-                JsonRpcResponse::error(id, -32603, format!("Tool creation failed: {}", e))
-            }
+            Err(e) => JsonRpcResponse::error(id, -32603, format!("Tool creation failed: {}", e)),
         }
     }
 }
