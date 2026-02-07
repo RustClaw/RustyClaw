@@ -123,10 +123,10 @@ pub async fn execute_tool_with_context(
             whatsapp::list_whatsapp_accounts(_params).await
         }
         "create_tool" => {
-            let params: super::creator::CreateToolRequest =
-                serde_json::from_str(&effective_arguments)
-                    .context("Failed to parse create_tool parameters")?;
-            super::creator::handle_create_tool(params).await
+            // Tool creation is now handled through MCP (Model Context Protocol)
+            Err(anyhow!(
+                "Tool creation must be done through MCP. Please use the tools/create MCP method."
+            ))
         }
         "delete_tool" => {
             #[derive(serde::Deserialize)]

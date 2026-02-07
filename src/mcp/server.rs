@@ -31,6 +31,7 @@ impl McpServer {
             "ping" => JsonRpcResponse::success(id, Value::Null),
             "tools/list" => self.handle_list_tools(id).await,
             "tools/call" => self.handle_call_tool(id, req.params).await,
+            "tools/create" => self.handle_create_tool(id, req.params).await,
             _ => JsonRpcResponse::error(id, -32601, format!("Method not found: {}", req.method)),
         }
     }
@@ -247,6 +248,30 @@ impl McpServer {
                     is_error: true,
                 };
                 JsonRpcResponse::success(id, serde_json::to_value(call_result).unwrap())
+            }
+        }
+    }
+
+    async fn handle_create_tool(&self, id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
+        use crate::tools::creator::CreateToolRequest;
+
+        let req: CreateToolRequest = match serde_json::from_value(params.unwrap_or(Value::Null)) {
+            Ok(r) => r,
+            Err(e) => return JsonRpcResponse::error(id, -32602, format!("Invalid params: {}", e)),
+        };
+
+        info!("MCP Tool Creation: {}", req.name);
+
+        match crate::tools::creator::handle_create_tool(req).await {
+            Ok(result) => {
+                let response = serde_json::json!({
+                    "success": true,
+                    "message": result
+                });
+                JsonRpcResponse::success(id, response)
+            }
+            Err(e) => {
+                JsonRpcResponse::error(id, -32603, format!("Tool creation failed: {}", e))
             }
         }
     }
