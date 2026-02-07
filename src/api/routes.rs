@@ -38,22 +38,10 @@ pub struct CreateSessionRequest {
     pub scope: Option<String>,
 }
 
-/// Invite request
-#[derive(Deserialize)]
-pub struct InviteRequest {}
-
-/// Invite response
-#[derive(serde::Serialize)]
-pub struct InviteResponse {
-    pub code: String,
-    pub expires_at: chrono::DateTime<Utc>,
-    pub uri: String,
-}
-
-/// Join request
+/// Join request (device linking with username/password)
 #[derive(Deserialize)]
 pub struct JoinRequest {
-    pub code: String,
+    pub username: String,
     pub password: String,
     pub label: String,
 }
@@ -96,55 +84,21 @@ pub struct ListTokensResponse {
 
 // ===== Device Linking Endpoints =====
 
-/// POST /api/auth/invite - Generate a device linking code
-pub async fn create_invite<S: Storage + 'static>(
-    State(router): State<Arc<Router<S>>>,
-    Extension(user_id): Extension<String>,
-    Json(_req): Json<InviteRequest>,
-) -> Result<Json<ApiResponse<InviteResponse>>, ApiError> {
-    let code = crate::core::utils::generate_code(8);
-
-    // Store in database
-    router
-        .get_storage()
-        .create_pending_link(&code, &user_id, "device_link")
-        .await
-        .map_err(|e| ApiError::InternalError(e.to_string()))?;
-
-    let response = InviteResponse {
-        code: code.clone(),
-        expires_at: Utc::now() + chrono::Duration::minutes(10),
-        uri: format!("rustyclaw://join?code={}", code),
-    };
-
-    Ok(Json(ApiResponse::success(response)))
-}
-
-/// POST /api/auth/join - Redeem an invite code with password verification
+/// POST /api/auth/join - Login with username/password
+///
+/// All devices use the same authentication: username + password
+/// Each device gets a unique token for API access
 pub async fn join_invite<S: Storage + 'static>(
     State(router): State<Arc<Router<S>>>,
     Json(req): Json<JoinRequest>,
 ) -> Result<Json<ApiResponse<JoinResponse>>, ApiError> {
-    // Validate code
-    let link_data = router
-        .get_storage()
-        .get_pending_link(&req.code)
-        .await
-        .map_err(|e| ApiError::InternalError(e.to_string()))?
-        .ok_or_else(|| ApiError::BadRequest("Invalid or expired invite code".to_string()))?;
-
-    let (user_id, provider) = link_data;
-    if provider != "device_link" {
-        return Err(ApiError::BadRequest("Invalid invite type".to_string()));
-    }
-
-    // Get user and verify password
+    // Get user by username
     let user = router
         .get_storage()
-        .get_user(&user_id)
+        .get_user_by_username(&req.username)
         .await
         .map_err(|e| ApiError::InternalError(e.to_string()))?
-        .ok_or_else(|| ApiError::BadRequest("User not found".to_string()))?;
+        .ok_or_else(|| ApiError::BadRequest("Invalid username or password".to_string()))?;
 
     // Verify password hash
     let password_hash = user
@@ -156,7 +110,9 @@ pub async fn join_invite<S: Storage + 'static>(
         .map_err(|e| ApiError::InternalError(e.to_string()))?;
 
     if !password_valid {
-        return Err(ApiError::BadRequest("Invalid password".to_string()));
+        return Err(ApiError::BadRequest(
+            "Invalid username or password".to_string(),
+        ));
     }
 
     // Generate new API token
@@ -164,8 +120,8 @@ pub async fn join_invite<S: Storage + 'static>(
     let identity = crate::storage::Identity {
         provider: "api_token".to_string(),
         provider_id: token.clone(),
-        user_id: user_id.clone(),
-        label: Some(req.label),
+        user_id: user.id.clone(),
+        label: Some(req.label.clone()),
         created_at: Utc::now(),
         last_used_at: None,
     };
@@ -173,13 +129,6 @@ pub async fn join_invite<S: Storage + 'static>(
     router
         .get_storage()
         .create_identity(identity)
-        .await
-        .map_err(|e| ApiError::InternalError(e.to_string()))?;
-
-    // Delete used code
-    router
-        .get_storage()
-        .delete_pending_link(&req.code)
         .await
         .map_err(|e| ApiError::InternalError(e.to_string()))?;
 

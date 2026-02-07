@@ -703,6 +703,12 @@ mod tests {
         async fn delete_identity(&self, _provider: &str, _provider_id: &str) -> Result<()> {
             Ok(())
         }
+        async fn list_users(&self) -> Result<Vec<crate::storage::User>> {
+            Ok(vec![])
+        }
+        async fn delete_user(&self, _user_id: &str) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[test]

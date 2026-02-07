@@ -70,6 +70,8 @@ pub trait Storage: Send + Sync + Clone {
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
     async fn create_user(&self, user: User) -> Result<()>;
     async fn user_count(&self) -> Result<usize>;
+    async fn list_users(&self) -> Result<Vec<User>>;
+    async fn delete_user(&self, user_id: &str) -> Result<()>;
 
     async fn get_identity(&self, provider: &str, provider_id: &str) -> Result<Option<Identity>>;
     async fn create_identity(&self, identity: Identity) -> Result<()>;

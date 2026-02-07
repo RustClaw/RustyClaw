@@ -226,6 +226,34 @@ impl Storage for SqliteStorage {
         Ok(row.0 as usize)
     }
 
+    async fn list_users(&self) -> Result<Vec<User>> {
+        let rows = sqlx::query(
+            "SELECT id, username, role, password_hash, created_at, updated_at FROM users",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| User {
+                id: r.get("id"),
+                username: r.get("username"),
+                role: r.get("role"),
+                password_hash: r.get("password_hash"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    async fn delete_user(&self, user_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn get_identity(&self, provider: &str, provider_id: &str) -> Result<Option<Identity>> {
         let row = sqlx::query(
             "SELECT provider, provider_id, user_id, label, created_at, last_used_at FROM identities WHERE provider = ? AND provider_id = ?"

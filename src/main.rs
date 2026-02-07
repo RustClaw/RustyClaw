@@ -23,6 +23,14 @@ enum Commands {
     /// Manage channel connections (WhatsApp, Discord, etc.)
     #[command(subcommand)]
     Channels(ChannelsCommands),
+
+    /// Manage users and authentication
+    #[command(subcommand)]
+    User(UserCommands),
+
+    /// Manage API tokens
+    #[command(subcommand)]
+    Token(TokenCommands),
 }
 
 #[derive(Subcommand)]
@@ -32,6 +40,63 @@ enum ChannelsCommands {
         /// Channel to connect (whatsapp, discord, etc.)
         #[arg(value_name = "CHANNEL")]
         channel: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum UserCommands {
+    /// Create a new user
+    Create {
+        /// Username
+        #[arg(long)]
+        username: String,
+
+        /// Password (if not provided, will be prompted)
+        #[arg(long)]
+        password: Option<String>,
+    },
+
+    /// Delete a user
+    Delete {
+        /// Username to delete
+        #[arg(long)]
+        username: String,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List all users
+    List,
+
+    /// Reset a user's password
+    #[command(name = "reset-password")]
+    ResetPassword {
+        /// Username whose password to reset
+        #[arg(long)]
+        username: String,
+
+        /// New password (if not provided, will be prompted)
+        #[arg(long)]
+        password: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenCommands {
+    /// List a user's API tokens
+    List {
+        /// Username
+        #[arg(long)]
+        username: String,
+    },
+
+    /// Revoke an API token
+    Revoke {
+        /// Token ID to revoke
+        #[arg(long)]
+        token_id: String,
     },
 }
 
@@ -70,6 +135,32 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Channels(ChannelsCommands::Connect { channel })) => {
             rustyclaw::channels::connect(&channel, config).await?;
+        }
+        Some(Commands::User(user_cmd)) => {
+            let cmd = match user_cmd {
+                UserCommands::Create { username, password } => {
+                    rustyclaw::cli::user::UserCmd::Create { username, password }
+                }
+                UserCommands::Delete { username, force } => {
+                    rustyclaw::cli::user::UserCmd::Delete { username, force }
+                }
+                UserCommands::List => rustyclaw::cli::user::UserCmd::List,
+                UserCommands::ResetPassword { username, password } => {
+                    rustyclaw::cli::user::UserCmd::ResetPassword { username, password }
+                }
+            };
+            rustyclaw::cli::user::handle_user_command(cmd, config).await?;
+        }
+        Some(Commands::Token(token_cmd)) => {
+            let cmd = match token_cmd {
+                TokenCommands::List { username } => {
+                    rustyclaw::cli::token::TokenCmd::List { username }
+                }
+                TokenCommands::Revoke { token_id } => {
+                    rustyclaw::cli::token::TokenCmd::Revoke { token_id }
+                }
+            };
+            rustyclaw::cli::token::handle_token_command(cmd, config).await?;
         }
     }
 

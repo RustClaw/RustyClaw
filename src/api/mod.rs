@@ -88,10 +88,6 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
         let api_routes = AxumRouter::new()
             // Auth endpoints
             .route(
-                &format!("{}/auth/invite", self.api_path),
-                post(routes::create_invite),
-            )
-            .route(
                 &format!("{}/auth/change-password", self.api_path),
                 post(routes::change_password),
             )
