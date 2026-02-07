@@ -7,9 +7,9 @@ llm:
   provider: "ollama"
   base_url: "http://192.168.15.14:11434/v1"
   models:
-    primary: "qwen2.5:32b"
+    primary: "mistral:7b-instruct"
     code: "deepseek-coder-v2:16b"
-    fast: "qwen2.5:7b"
+    fast: "mistral:7b-instruct"
   keep_alive: "5m"
   cache:
     type: "ram"
