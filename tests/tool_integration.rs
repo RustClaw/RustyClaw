@@ -132,9 +132,8 @@ async fn test_llm_tool_creation_and_execution_flow() {
         description: "Count the number of words in the input text".to_string(),
         runtime: "bash".to_string(),
         body: r#"#!/bin/bash
-# Count words in the input using bash builtins
-set "$1"
-echo ${#@}"#
+# Count words in the input text
+echo "$1" | awk '{print NF}'"#
             .to_string(),
         parameters: json!({
             "type": "object",
