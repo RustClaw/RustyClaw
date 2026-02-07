@@ -133,7 +133,10 @@ async fn test_llm_tool_creation_and_execution_flow() {
         runtime: "bash".to_string(),
         body: r#"#!/bin/bash
 # Count words in the input text
-echo "$1" | awk '{print NF}'"#
+# Arguments are passed as JSON in SKILL_ARGS environment variable
+# Parse the JSON to extract the text field
+text=$(echo "$SKILL_ARGS" | grep -o '"text":"[^"]*"' | cut -d'"' -f4)
+echo "$text" | awk '{print NF}'"#
             .to_string(),
         parameters: json!({
             "type": "object",
