@@ -10,14 +10,35 @@ use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 /// Stream events sent from process_message_stream
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StreamEvent {
     /// Content token(s) from LLM
     Delta(String),
     /// About to execute a tool
-    ToolStart { name: String },
+    ToolStart {
+        name: String,
+        #[serde(default)]
+        attempt: Option<usize>,
+        #[serde(default)]
+        max_attempts: Option<usize>,
+    },
     /// Tool finished executing
-    ToolEnd { name: String, result: String },
+    ToolEnd {
+        name: String,
+        result: String,
+        #[serde(default)]
+        execution_time_ms: Option<u64>,
+        #[serde(default)]
+        attempt: Option<usize>,
+    },
+    /// Tool approval request sent to client
+    ApprovalRequested {
+        request_id: String,
+        tool_name: String,
+        arguments: String,
+        policy: String,
+        sandbox_available: bool,
+    },
     /// Streaming finished
     Done {
         model: String,
@@ -34,6 +55,7 @@ pub struct SessionManager<S: Storage> {
     config: Arc<RwLock<Config>>,
     llm_client: LlmClient,
     workspace: Workspace,
+    approval_manager: Arc<crate::core::ApprovalManager>,
 }
 
 #[derive(Clone)]
@@ -63,6 +85,24 @@ impl<S: Storage + 'static> SessionManager<S> {
             config,
             llm_client,
             workspace,
+            approval_manager: Arc::new(crate::core::ApprovalManager::new()),
+        }
+    }
+
+    /// Create with existing ApprovalManager (for dependency injection)
+    pub fn with_approval_manager(
+        storage: S,
+        config: Arc<RwLock<Config>>,
+        llm_client: LlmClient,
+        workspace: Workspace,
+        approval_manager: Arc<crate::core::ApprovalManager>,
+    ) -> Self {
+        Self {
+            storage,
+            config,
+            llm_client,
+            workspace,
+            approval_manager,
         }
     }
 
@@ -270,12 +310,20 @@ impl<S: Storage + 'static> SessionManager<S> {
         let llm_client = self.llm_client.clone();
         let session_id = session_id.to_string();
         let workspace = self.resolve_workspace(agent_id).await;
+        let approval_manager = self.approval_manager.clone();
 
         // Spawn streaming task
         tokio::spawn(async move {
-            if let Err(e) =
-                process_message_stream_task(storage, llm_client, session_id, tools, tx, workspace)
-                    .await
+            if let Err(e) = process_message_stream_task(
+                storage,
+                llm_client,
+                session_id,
+                tools,
+                tx,
+                workspace,
+                approval_manager,
+            )
+            .await
             {
                 tracing::error!("Error in streaming task: {}", e);
             }
@@ -688,6 +736,7 @@ async fn process_message_stream_task<S: Storage + 'static>(
     tools: Vec<ToolDefinition>,
     tx: mpsc::Sender<StreamEvent>,
     workspace: Workspace,
+    approval_manager: Arc<crate::core::ApprovalManager>,
 ) -> Result<()> {
     use futures::StreamExt;
     use std::collections::HashMap;
@@ -837,10 +886,25 @@ async fn process_message_stream_task<S: Storage + 'static>(
             for (_idx, tool_call) in sorted_tools {
                 tracing::info!("Executing tool: {}", tool_call.name);
 
-                // Send tool start event
+                // Determine if sandbox is available (from server config)
+                let sandbox_available = crate::get_sandbox_manager().is_some();
+
+                // Execute tool with approval flow and retry mechanism
+                let execution_result = crate::tools::executor::execute_tool_with_approval(
+                    &tool_call.name,
+                    &tool_call.arguments,
+                    &session_id,
+                    &approval_manager,
+                    sandbox_available,
+                )
+                .await;
+
+                // Send tool start event with attempt tracking
                 if tx
                     .send(StreamEvent::ToolStart {
                         name: tool_call.name.clone(),
+                        attempt: Some(execution_result.attempt),
+                        max_attempts: Some(execution_result.max_attempts),
                     })
                     .await
                     .is_err()
@@ -849,30 +913,24 @@ async fn process_message_stream_task<S: Storage + 'static>(
                     return Ok(());
                 }
 
-                // Execute tool
-                let result = match crate::tools::executor::execute_tool_with_context(
-                    &tool_call.name,
-                    &tool_call.arguments,
-                    Some(&session_id),
-                    true,
-                )
-                .await
-                {
-                    Ok(result) => {
-                        tracing::info!("Tool {} succeeded", tool_call.name);
-                        result
-                    }
-                    Err(err) => {
-                        tracing::error!("Tool {} failed: {}", tool_call.name, err);
-                        format!("Error: {}", err)
-                    }
+                // Format result for LLM feedback
+                let result_content = if execution_result.is_success() {
+                    execution_result.output.clone().unwrap_or_default()
+                } else {
+                    let error_msg = execution_result
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    format!("Error: {}", error_msg)
                 };
 
-                // Send tool end event
+                // Send tool end event with full execution metadata
                 if tx
                     .send(StreamEvent::ToolEnd {
                         name: tool_call.name.clone(),
-                        result: result.clone(),
+                        result: result_content.clone(),
+                        execution_time_ms: execution_result.execution_time_ms,
+                        attempt: Some(execution_result.attempt),
                     })
                     .await
                     .is_err()
@@ -881,10 +939,41 @@ async fn process_message_stream_task<S: Storage + 'static>(
                     return Ok(());
                 }
 
-                // Add tool result to message history
+                // Add tool result to message history (for LLM to learn from)
+                let feedback = if execution_result.is_success() {
+                    format!(
+                        "Tool {} executed successfully (attempt {}/{}): {}",
+                        tool_call.name,
+                        execution_result.attempt,
+                        execution_result.max_attempts,
+                        result_content
+                    )
+                } else if execution_result.attempt < execution_result.max_attempts {
+                    format!(
+                        "Tool {} failed (attempt {}/{}), will retry: {}",
+                        tool_call.name,
+                        execution_result.attempt,
+                        execution_result.max_attempts,
+                        execution_result
+                            .error
+                            .as_ref()
+                            .unwrap_or(&"Unknown error".to_string())
+                    )
+                } else {
+                    format!(
+                        "Tool {} failed after {} attempts: {}",
+                        tool_call.name,
+                        execution_result.max_attempts,
+                        execution_result
+                            .error
+                            .as_ref()
+                            .unwrap_or(&"Unknown error".to_string())
+                    )
+                };
+
                 llm_messages.push(ChatMessage {
                     role: "user".to_string(),
-                    content: format!("Tool {} result: {}", tool_call.name, result),
+                    content: feedback,
                 });
             }
         } else {
@@ -925,4 +1014,144 @@ async fn process_message_stream_task<S: Storage + 'static>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_event_delta() {
+        let event = StreamEvent::Delta("test content".to_string());
+        match event {
+            StreamEvent::Delta(content) => assert_eq!(content, "test content"),
+            _ => panic!("Expected Delta event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_tool_start_with_attempt() {
+        let event = StreamEvent::ToolStart {
+            name: "bash".to_string(),
+            attempt: Some(1),
+            max_attempts: Some(10),
+        };
+        match event {
+            StreamEvent::ToolStart {
+                name,
+                attempt,
+                max_attempts,
+            } => {
+                assert_eq!(name, "bash");
+                assert_eq!(attempt, Some(1));
+                assert_eq!(max_attempts, Some(10));
+            }
+            _ => panic!("Expected ToolStart event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_tool_start_without_attempt() {
+        let event = StreamEvent::ToolStart {
+            name: "bash".to_string(),
+            attempt: None,
+            max_attempts: None,
+        };
+        match event {
+            StreamEvent::ToolStart {
+                name,
+                attempt,
+                max_attempts,
+            } => {
+                assert_eq!(name, "bash");
+                assert_eq!(attempt, None);
+                assert_eq!(max_attempts, None);
+            }
+            _ => panic!("Expected ToolStart event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_tool_end_with_metadata() {
+        let event = StreamEvent::ToolEnd {
+            name: "bash".to_string(),
+            result: "output".to_string(),
+            execution_time_ms: Some(1234),
+            attempt: Some(1),
+        };
+        match event {
+            StreamEvent::ToolEnd {
+                name,
+                result,
+                execution_time_ms,
+                attempt,
+            } => {
+                assert_eq!(name, "bash");
+                assert_eq!(result, "output");
+                assert_eq!(execution_time_ms, Some(1234));
+                assert_eq!(attempt, Some(1));
+            }
+            _ => panic!("Expected ToolEnd event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_tool_end_without_metadata() {
+        let event = StreamEvent::ToolEnd {
+            name: "bash".to_string(),
+            result: "output".to_string(),
+            execution_time_ms: None,
+            attempt: None,
+        };
+        match event {
+            StreamEvent::ToolEnd {
+                name,
+                result,
+                execution_time_ms,
+                attempt,
+            } => {
+                assert_eq!(name, "bash");
+                assert_eq!(result, "output");
+                assert_eq!(execution_time_ms, None);
+                assert_eq!(attempt, None);
+            }
+            _ => panic!("Expected ToolEnd event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_approval_requested() {
+        let event = StreamEvent::ApprovalRequested {
+            request_id: "req_123".to_string(),
+            tool_name: "bash".to_string(),
+            arguments: r#"{"cmd":"ls"}"#.to_string(),
+            policy: "elevated".to_string(),
+            sandbox_available: true,
+        };
+        match event {
+            StreamEvent::ApprovalRequested {
+                request_id,
+                tool_name,
+                arguments,
+                policy,
+                sandbox_available,
+            } => {
+                assert_eq!(request_id, "req_123");
+                assert_eq!(tool_name, "bash");
+                assert_eq!(arguments, r#"{"cmd":"ls"}"#);
+                assert_eq!(policy, "elevated");
+                assert!(sandbox_available);
+            }
+            _ => panic!("Expected ApprovalRequested event"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_error() {
+        let event = StreamEvent::Error("Something went wrong".to_string());
+        match event {
+            StreamEvent::Error(msg) => assert_eq!(msg, "Something went wrong"),
+            _ => panic!("Expected Error event"),
+        }
+    }
 }

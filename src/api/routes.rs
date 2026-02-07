@@ -363,11 +363,20 @@ async fn chat_stream_sse<S: Storage + 'static>(
     let sse_stream = stream.map(|event| -> Result<Event, String> {
         match event {
             StreamEvent::Delta(text) => Ok(Event::default().data(text)),
-            StreamEvent::ToolStart { name } => Ok(Event::default().event("tool_start").data(name)),
-            StreamEvent::ToolEnd { name, result } => {
+            StreamEvent::ToolStart { name, .. } => {
+                Ok(Event::default().event("tool_start").data(name))
+            }
+            StreamEvent::ToolEnd {
+                name,
+                result,
+                execution_time_ms,
+                attempt,
+            } => {
                 let data = serde_json::json!({
                     "name": name,
-                    "result": result
+                    "result": result,
+                    "execution_time_ms": execution_time_ms,
+                    "attempt": attempt
                 });
                 Ok(Event::default().event("tool_end").data(data.to_string()))
             }
@@ -377,6 +386,24 @@ async fn chat_stream_sse<S: Storage + 'static>(
                     "usage": usage
                 });
                 Ok(Event::default().event("done").data(data.to_string()))
+            }
+            StreamEvent::ApprovalRequested {
+                request_id,
+                tool_name,
+                arguments,
+                policy,
+                sandbox_available,
+            } => {
+                let data = serde_json::json!({
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "policy": policy,
+                    "sandbox_available": sandbox_available
+                });
+                Ok(Event::default()
+                    .event("approval_requested")
+                    .data(data.to_string()))
             }
             StreamEvent::Error(msg) => Ok(Event::default().event("error").data(msg)),
         }

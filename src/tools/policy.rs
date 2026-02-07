@@ -39,6 +39,17 @@ pub enum ToolPolicyError {
     ElevatedRequired { tool: String },
 }
 
+/// Decision about whether a tool should be executed
+#[derive(Debug, Clone)]
+pub enum ToolAccessDecision {
+    /// Tool is allowed, execute immediately
+    Allowed,
+    /// Tool is denied by policy
+    Denied { reason: String },
+    /// Tool requires user approval via WebSocket
+    RequiresApproval { sandbox_available: bool },
+}
+
 /// Tool policy enforcement engine
 pub struct ToolPolicyEngine {
     policies: Arc<RwLock<HashMap<String, ToolAccessLevel>>>,
@@ -116,6 +127,54 @@ impl ToolPolicyEngine {
     pub async fn is_elevated(&self, session_id: &str) -> bool {
         let elevated = self.elevated_mode.read().await;
         elevated.contains(session_id)
+    }
+
+    /// Get the access decision for a tool (used for interactive approval flow)
+    ///
+    /// Returns:
+    /// - Allowed: tool can be executed immediately
+    /// - Denied: tool is blocked by policy
+    /// - RequiresApproval: tool needs user approval via WebSocket
+    pub async fn get_access_decision(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        sandbox_available: bool,
+    ) -> ToolAccessDecision {
+        let policies = self.policies.read().await;
+        let level = policies
+            .get(tool_name)
+            .cloned()
+            .unwrap_or(ToolAccessLevel::Deny);
+
+        match level {
+            ToolAccessLevel::Allow => {
+                debug!("Tool '{}' allowed by policy", tool_name);
+                ToolAccessDecision::Allowed
+            }
+            ToolAccessLevel::Deny => {
+                debug!("Tool '{}' denied by policy", tool_name);
+                ToolAccessDecision::Denied {
+                    reason: format!(
+                        "Tool '{}' is denied by policy. Use '/elevated on' to request elevated access.",
+                        tool_name
+                    ),
+                }
+            }
+            ToolAccessLevel::Elevated => {
+                let elevated = self.elevated_mode.read().await;
+                if elevated.contains(session_id) {
+                    debug!("Tool '{}' allowed via elevated mode", tool_name);
+                    ToolAccessDecision::Allowed
+                } else {
+                    debug!(
+                        "Tool '{}' requires approval for session {}",
+                        tool_name, session_id
+                    );
+                    ToolAccessDecision::RequiresApproval { sandbox_available }
+                }
+            }
+        }
     }
 
     /// Get the access level for a tool
@@ -256,6 +315,78 @@ mod tests {
         assert!(matches!(
             result,
             Err(ToolPolicyError::ElevatedRequired { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_allow_policy() {
+        let engine = ToolPolicyEngine::new();
+        let decision = engine
+            .get_access_decision("session1", "send_whatsapp", true)
+            .await;
+        assert!(matches!(decision, ToolAccessDecision::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_deny_policy() {
+        let engine = ToolPolicyEngine::new();
+        let decision = engine
+            .get_access_decision("session1", "unknown_tool", true)
+            .await;
+        assert!(matches!(decision, ToolAccessDecision::Denied { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_elevated_requires_approval() {
+        let engine = ToolPolicyEngine::new();
+        let decision = engine.get_access_decision("session1", "exec", true).await;
+        assert!(matches!(
+            decision,
+            ToolAccessDecision::RequiresApproval {
+                sandbox_available: true
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_elevated_with_mode_enabled() {
+        let engine = ToolPolicyEngine::new();
+        engine.set_elevated("session1", true).await;
+        let decision = engine.get_access_decision("session1", "exec", true).await;
+        assert!(matches!(decision, ToolAccessDecision::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_elevated_no_sandbox() {
+        let engine = ToolPolicyEngine::new();
+        let decision = engine.get_access_decision("session1", "exec", false).await;
+        assert!(matches!(
+            decision,
+            ToolAccessDecision::RequiresApproval {
+                sandbox_available: false
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_decision_elevated_mode_revoked() {
+        let engine = ToolPolicyEngine::new();
+        engine.set_elevated("session1", true).await;
+
+        // Initially allowed with elevated mode
+        let decision = engine.get_access_decision("session1", "exec", true).await;
+        assert!(matches!(decision, ToolAccessDecision::Allowed));
+
+        // Revoke elevated mode
+        engine.set_elevated("session1", false).await;
+
+        // Should now require approval
+        let decision = engine.get_access_decision("session1", "exec", true).await;
+        assert!(matches!(
+            decision,
+            ToolAccessDecision::RequiresApproval {
+                sandbox_available: true
+            }
         ));
     }
 }

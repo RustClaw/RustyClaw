@@ -1,5 +1,6 @@
 pub mod creator;
 pub mod exec;
+pub mod execution_result;
 pub mod executor;
 pub mod memory;
 pub mod policy;
@@ -9,7 +10,8 @@ pub mod whatsapp;
 
 pub use creator::{get_creator_tool_definitions, CreateToolRequest};
 pub use exec::{exec_bash, exec_command, get_exec_tool_definitions};
-pub use executor::execute_tool;
+pub use execution_result::{ToolExecutionResult, ToolRetryPolicy};
+pub use executor::{execute_tool, execute_tool_with_approval};
 pub use memory::{execute_memory_tool, get_memory_tool_definitions};
 pub use policy::ToolPolicyEngine;
 pub use skill_watcher::SkillWatcher;

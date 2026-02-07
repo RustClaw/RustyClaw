@@ -1,8 +1,9 @@
 use crate::config::workspace::Workspace;
 use crate::config::Config;
-use crate::core::{MessageResponse, PairingManager, SessionManager};
+use crate::core::{ApprovalManager, MessageResponse, PairingManager, SessionManager};
 use crate::llm::Client as LlmClient;
 use crate::storage::Storage;
+use crate::tools::ToolPolicyEngine;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -14,6 +15,8 @@ pub struct Router<S: Storage> {
     config: Arc<RwLock<Config>>,
     session_manager: SessionManager<S>,
     pub pairing_manager: PairingManager<S>,
+    approval_manager: Arc<ApprovalManager>,
+    policy_engine: Arc<ToolPolicyEngine>,
 }
 
 impl<S: Storage + 'static> Router<S> {
@@ -35,14 +38,25 @@ impl<S: Storage + 'static> Router<S> {
             tracing::warn!("Failed to initialize workspace: {}", e);
         }
 
-        let session_manager =
-            SessionManager::new(storage.clone(), config.clone(), llm_client, workspace);
+        // Create approval manager and policy engine
+        let approval_manager = Arc::new(ApprovalManager::new());
+        let policy_engine = Arc::new(ToolPolicyEngine::new());
+
+        let session_manager = SessionManager::with_approval_manager(
+            storage.clone(),
+            config.clone(),
+            llm_client,
+            workspace,
+            approval_manager.clone(),
+        );
         let pairing_manager = PairingManager::new(storage);
 
         Self {
             config,
             session_manager,
             pairing_manager,
+            approval_manager,
+            policy_engine,
         }
     }
 
@@ -52,6 +66,16 @@ impl<S: Storage + 'static> Router<S> {
 
     pub fn workspace(&self) -> &crate::config::workspace::Workspace {
         self.session_manager.workspace()
+    }
+
+    /// Get the approval manager (for handling tool approval requests)
+    pub fn get_approval_manager(&self) -> Result<Arc<ApprovalManager>> {
+        Ok(self.approval_manager.clone())
+    }
+
+    /// Get the policy engine (for tool access control)
+    pub fn get_policy_engine(&self) -> Result<Arc<ToolPolicyEngine>> {
+        Ok(self.policy_engine.clone())
     }
 
     /// Resolve agent ID based on user and channel

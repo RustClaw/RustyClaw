@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Context, Result};
-use tracing::info;
+use std::time::Instant;
+use tracing::{debug, info, warn};
 
+use super::execution_result::{ToolExecutionResult, ToolRetryPolicy};
 use super::whatsapp;
+use crate::core::ApprovalManager;
 
 /// Execute a tool by name with the given arguments
 pub async fn execute_tool(name: &str, arguments: &str) -> Result<String> {
@@ -218,6 +221,141 @@ pub async fn execute_tool_with_context(
     result_content
 }
 
+/// Execute a tool with approval flow and retry mechanism
+///
+/// This function implements the interactive approval flow:
+/// 1. Checks tool access policy
+/// 2. If approval required, creates approval request and waits for user response
+/// 3. Executes tool with support for sandbox selection
+/// 4. On error, retries up to 10 times with exponential backoff
+/// 5. Returns detailed execution result with output, errors, and timing
+pub async fn execute_tool_with_approval(
+    tool_name: &str,
+    arguments: &str,
+    session_id: &str,
+    approval_manager: &ApprovalManager,
+    sandbox_available: bool,
+) -> ToolExecutionResult {
+    let mut attempt = 1;
+    let max_attempts = 10;
+    let retry_policy = ToolRetryPolicy::default();
+
+    loop {
+        // First attempt: check policy and request approval if needed
+        if attempt == 1 {
+            // Get the tool policy decision
+            if let Some(policy) = crate::get_tool_policy_engine() {
+                let decision = policy
+                    .get_access_decision(session_id, tool_name, sandbox_available)
+                    .await;
+
+                match decision {
+                    super::policy::ToolAccessDecision::Denied { reason } => {
+                        debug!("Tool execution denied: {}", reason);
+                        return ToolExecutionResult::error(reason, 0, attempt, max_attempts);
+                    }
+                    super::policy::ToolAccessDecision::RequiresApproval {
+                        sandbox_available: _,
+                    } => {
+                        // Create approval request
+                        let request_id = approval_manager
+                            .create_approval_request(
+                                session_id,
+                                tool_name,
+                                arguments,
+                                "elevated",
+                                sandbox_available,
+                            )
+                            .await;
+
+                        debug!(
+                            "Created approval request: request_id={}, tool={}",
+                            request_id, tool_name
+                        );
+
+                        // Wait for user approval (60-second timeout)
+                        match approval_manager.wait_for_approval(&request_id, 60).await {
+                            Some(response) => {
+                                if !response.approved {
+                                    debug!("Tool execution denied by user: {}", tool_name);
+                                    return ToolExecutionResult::error(
+                                        "Tool execution denied by user".to_string(),
+                                        0,
+                                        attempt,
+                                        max_attempts,
+                                    );
+                                }
+                                debug!(
+                                    "Tool execution approved: sandbox={}, remember={}",
+                                    response.use_sandbox, response.remember_for_session
+                                );
+                            }
+                            None => {
+                                debug!("Tool approval request timed out after 60s: {}", tool_name);
+                                return ToolExecutionResult::error(
+                                    "Tool approval request timed out".to_string(),
+                                    0,
+                                    attempt,
+                                    max_attempts,
+                                );
+                            }
+                        }
+                    }
+                    super::policy::ToolAccessDecision::Allowed => {
+                        debug!("Tool execution allowed by policy: {}", tool_name);
+                    }
+                }
+            }
+        }
+
+        // Execute the tool
+        let start_time = Instant::now();
+        let execution_result =
+            execute_tool_with_context(tool_name, arguments, Some(session_id), false).await;
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        match execution_result {
+            Ok(output) => {
+                debug!(
+                    "Tool executed successfully (attempt {}/{}): {}",
+                    attempt, max_attempts, tool_name
+                );
+                return ToolExecutionResult::success(output, duration_ms, attempt, max_attempts);
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+
+                // Check if we should retry
+                if retry_policy.should_retry(attempt, true) {
+                    let backoff = retry_policy.get_backoff(attempt);
+                    warn!(
+                        "Tool execution failed (attempt {}/{}), retrying in {:?}: {} - {}",
+                        attempt, max_attempts, backoff, tool_name, error_msg
+                    );
+
+                    // Sleep for exponential backoff
+                    tokio::time::sleep(backoff).await;
+
+                    attempt += 1;
+                    continue;
+                } else {
+                    // Max attempts reached
+                    warn!(
+                        "Tool execution failed after {} attempts: {} - {}",
+                        attempt, tool_name, error_msg
+                    );
+                    return ToolExecutionResult::error(
+                        error_msg,
+                        duration_ms,
+                        attempt,
+                        max_attempts,
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Convert tool execution results to a message for the LLM
 pub fn format_tool_result(tool_name: &str, result: &str, success: bool) -> String {
     if success {
@@ -250,5 +388,74 @@ mod tests {
         let result = format_tool_result("test_tool", "Error message", false);
         assert!(result.contains("test_tool"));
         assert!(result.contains("Error message"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_result_success() {
+        let result = ToolExecutionResult::success("output".to_string(), 1000, 1, 10);
+        assert!(result.is_success());
+        assert!(!result.is_error());
+        assert_eq!(result.status, "done");
+        assert_eq!(result.attempt, 1);
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_result_error() {
+        let result = ToolExecutionResult::error("failed".to_string(), 500, 1, 10);
+        assert!(!result.is_success());
+        assert!(result.is_error());
+        assert_eq!(result.status, "error");
+        assert_eq!(result.attempt, 1);
+        assert!(result.can_retry());
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_result_max_attempts() {
+        let result = ToolExecutionResult::error("failed".to_string(), 500, 10, 10);
+        assert!(result.is_error());
+        assert!(!result.can_retry()); // No more attempts
+    }
+
+    #[tokio::test]
+    async fn test_retry_policy_backoff_progression() {
+        let policy = ToolRetryPolicy::default();
+
+        // Verify exponential backoff progression
+        assert_eq!(policy.get_backoff(1).as_millis(), 100);
+        assert_eq!(policy.get_backoff(2).as_millis(), 200);
+        assert_eq!(policy.get_backoff(3).as_millis(), 400);
+        assert_eq!(policy.get_backoff(4).as_millis(), 800);
+        assert_eq!(policy.get_backoff(5).as_millis(), 1600);
+        assert_eq!(policy.get_backoff(6).as_millis(), 3200);
+        // Capped at 5000ms
+        assert_eq!(policy.get_backoff(7).as_millis(), 5000);
+        assert_eq!(policy.get_backoff(8).as_millis(), 5000);
+    }
+
+    #[tokio::test]
+    async fn test_retry_policy_max_retries_enforcement() {
+        let policy = ToolRetryPolicy::default();
+
+        // Should retry up to 10 times
+        for attempt in 1..10 {
+            assert!(policy.should_retry(attempt, true));
+        }
+
+        // Should NOT retry on attempt 10
+        assert!(!policy.should_retry(10, true));
+
+        // Should NOT retry on success
+        assert!(!policy.should_retry(1, false));
+    }
+
+    #[tokio::test]
+    async fn test_retry_policy_custom_max_retries() {
+        let policy = ToolRetryPolicy::with_max_retries(3);
+
+        assert_eq!(policy.max_retries, 3);
+        assert!(policy.should_retry(1, true)); // Can retry on attempt 1
+        assert!(policy.should_retry(2, true)); // Can retry on attempt 2
+        assert!(!policy.should_retry(3, true)); // Cannot retry on attempt 3 (at max)
+        assert!(!policy.should_retry(4, true)); // Cannot retry on attempt 4 (exceeds max)
     }
 }

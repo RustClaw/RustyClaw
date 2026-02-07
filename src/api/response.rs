@@ -161,8 +161,38 @@ pub enum WebSocketMessage {
         latency_ms: u64,
     },
 
-    /// Server → Client: Tool execution status
-    ToolUse { name: String, status: String },
+    /// Server → Client: Tool execution status with output/error/timing
+    ToolUse {
+        name: String,
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        execution_time_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attempt: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_attempts: Option<usize>,
+    },
+
+    /// Server → Client: Request tool approval from user
+    ToolApprovalRequest {
+        request_id: String,
+        tool: String,
+        arguments: String,
+        policy: String,
+        sandbox_available: bool,
+    },
+
+    /// Client → Server: Tool approval response
+    ToolApprovalResponse {
+        request_id: String,
+        approved: bool,
+        use_sandbox: bool,
+        remember_for_session: bool,
+    },
 
     /// Server → Client: Error occurred
     Error { error: String, error_code: u32 },
@@ -219,5 +249,134 @@ mod tests {
 
         assert!(ping.to_json().is_ok());
         assert!(pong.to_json().is_ok());
+    }
+
+    #[test]
+    fn test_tool_approval_request_serialization() {
+        let msg = WebSocketMessage::ToolApprovalRequest {
+            request_id: "req-123".to_string(),
+            tool: "bash".to_string(),
+            arguments: r#"{"command": "ls"}"#.to_string(),
+            policy: "elevated".to_string(),
+            sandbox_available: true,
+        };
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("tool_approval_request"));
+        assert!(json.contains("req-123"));
+        assert!(json.contains("bash"));
+
+        let parsed = WebSocketMessage::from_json(&json).unwrap();
+        if let WebSocketMessage::ToolApprovalRequest {
+            request_id, tool, ..
+        } = parsed
+        {
+            assert_eq!(request_id, "req-123");
+            assert_eq!(tool, "bash");
+        } else {
+            panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_tool_approval_response_serialization() {
+        let msg = WebSocketMessage::ToolApprovalResponse {
+            request_id: "req-123".to_string(),
+            approved: true,
+            use_sandbox: true,
+            remember_for_session: false,
+        };
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("tool_approval_response"));
+        assert!(json.contains("req-123"));
+
+        let parsed = WebSocketMessage::from_json(&json).unwrap();
+        if let WebSocketMessage::ToolApprovalResponse {
+            request_id,
+            approved,
+            ..
+        } = parsed
+        {
+            assert_eq!(request_id, "req-123");
+            assert!(approved);
+        } else {
+            panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_enhanced_tool_use_serialization() {
+        let msg = WebSocketMessage::ToolUse {
+            name: "bash".to_string(),
+            status: "done".to_string(),
+            output: Some("command output".to_string()),
+            error: None,
+            execution_time_ms: Some(1234),
+            attempt: Some(1),
+            max_attempts: Some(10),
+        };
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("tool_use"));
+        assert!(json.contains("bash"));
+        assert!(json.contains("done"));
+        assert!(json.contains("command output"));
+        assert!(json.contains("1234"));
+
+        let parsed = WebSocketMessage::from_json(&json).unwrap();
+        if let WebSocketMessage::ToolUse {
+            name,
+            output,
+            execution_time_ms,
+            ..
+        } = parsed
+        {
+            assert_eq!(name, "bash");
+            assert_eq!(output, Some("command output".to_string()));
+            assert_eq!(execution_time_ms, Some(1234));
+        } else {
+            panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_tool_use_with_error_serialization() {
+        let msg = WebSocketMessage::ToolUse {
+            name: "bash".to_string(),
+            status: "error".to_string(),
+            output: None,
+            error: Some("command not found".to_string()),
+            execution_time_ms: Some(500),
+            attempt: Some(1),
+            max_attempts: Some(10),
+        };
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("error"));
+        assert!(json.contains("command not found"));
+
+        let parsed = WebSocketMessage::from_json(&json).unwrap();
+        if let WebSocketMessage::ToolUse { status, error, .. } = parsed {
+            assert_eq!(status, "error");
+            assert_eq!(error, Some("command not found".to_string()));
+        } else {
+            panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_tool_use_optional_fields_omitted() {
+        let msg = WebSocketMessage::ToolUse {
+            name: "bash".to_string(),
+            status: "running".to_string(),
+            output: None,
+            error: None,
+            execution_time_ms: None,
+            attempt: None,
+            max_attempts: None,
+        };
+        let json = msg.to_json().unwrap();
+        // Optional fields should not be in JSON when None
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("output").is_none() || parsed["output"].is_null());
+        assert!(parsed.get("error").is_none() || parsed["error"].is_null());
+        assert!(parsed.get("execution_time_ms").is_none() || parsed["execution_time_ms"].is_null());
     }
 }

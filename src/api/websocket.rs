@@ -132,6 +132,46 @@ async fn handle_socket<S: Storage + 'static>(
                                     }
                                 }
                             }
+                            Ok(WebSocketMessage::ToolApprovalResponse {
+                                request_id,
+                                approved,
+                                use_sandbox,
+                                remember_for_session,
+                            }) => {
+                                debug!(
+                                    "Tool approval response from {}: request_id={}, approved={}, use_sandbox={}, remember={}",
+                                    user_id_clone, request_id, approved, use_sandbox, remember_for_session
+                                );
+
+                                // Route to ApprovalManager
+                                if let Ok(approval_mgr) = router_clone.get_approval_manager() {
+                                    approval_mgr
+                                        .submit_approval_response(
+                                            &request_id,
+                                            approved,
+                                            use_sandbox,
+                                            remember_for_session,
+                                        )
+                                        .await;
+
+                                    debug!(
+                                        "Tool approval response stored: request_id={}, approved={}",
+                                        request_id, approved
+                                    );
+                                } else {
+                                    warn!(
+                                        "Failed to access approval manager for response: request_id={}",
+                                        request_id
+                                    );
+                                    let err_msg = WebSocketMessage::Error {
+                                        error: "Approval manager not available".to_string(),
+                                        error_code: 500,
+                                    };
+                                    if let Ok(json) = err_msg.to_json() {
+                                        let _ = sender.send(Message::Text(json)).await;
+                                    }
+                                }
+                            }
                             Ok(WebSocketMessage::Pong) => {
                                 debug!("Received pong from {}", user_id_clone);
                             }
@@ -237,11 +277,20 @@ async fn process_and_stream<S: Storage + 'static>(
                     }
                 }
             }
-            StreamEvent::ToolStart { name } => {
+            StreamEvent::ToolStart {
+                name,
+                attempt,
+                max_attempts,
+            } => {
                 // Send tool start event
                 let tool_msg = WebSocketMessage::ToolUse {
                     name,
                     status: "running".to_string(),
+                    output: None,
+                    error: None,
+                    execution_time_ms: None,
+                    attempt,
+                    max_attempts,
                 };
                 if let Ok(json) = tool_msg.to_json() {
                     if sender.send(Message::Text(json)).await.is_err() {
@@ -249,11 +298,21 @@ async fn process_and_stream<S: Storage + 'static>(
                     }
                 }
             }
-            StreamEvent::ToolEnd { name, .. } => {
+            StreamEvent::ToolEnd {
+                name,
+                result,
+                execution_time_ms,
+                attempt,
+            } => {
                 // Send tool end event
                 let tool_msg = WebSocketMessage::ToolUse {
                     name,
                     status: "done".to_string(),
+                    output: Some(result),
+                    error: None,
+                    execution_time_ms,
+                    attempt,
+                    max_attempts: None,
                 };
                 if let Ok(json) = tool_msg.to_json() {
                     if sender.send(Message::Text(json)).await.is_err() {
@@ -280,6 +339,28 @@ async fn process_and_stream<S: Storage + 'static>(
                     let _ = sender.send(Message::Text(json)).await;
                 }
                 break;
+            }
+            StreamEvent::ApprovalRequested {
+                request_id,
+                tool_name,
+                arguments,
+                policy,
+                sandbox_available,
+            } => {
+                debug!(
+                    "Forwarding approval request: request_id={}, tool={}",
+                    request_id, tool_name
+                );
+                let approval_msg = WebSocketMessage::ToolApprovalRequest {
+                    request_id,
+                    tool: tool_name,
+                    arguments,
+                    policy,
+                    sandbox_available,
+                };
+                if let Ok(json) = approval_msg.to_json() {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
             }
             StreamEvent::Error(msg) => {
                 error!("Stream error: {}", msg);
