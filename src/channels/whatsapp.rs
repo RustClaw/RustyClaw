@@ -696,6 +696,13 @@ mod tests {
         async fn delete_pending_link(&self, _code: &str) -> Result<()> {
             Ok(())
         }
+
+        async fn update_user_password(&self, _user_id: &str, _password_hash: String) -> Result<()> {
+            Ok(())
+        }
+        async fn delete_identity(&self, _provider: &str, _provider_id: &str) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -755,6 +762,7 @@ mod tests {
             sandbox: Default::default(),
             tools: Default::default(),
             api: Default::default(),
+            admin: Default::default(),
             workspace: Default::default(),
             agents: Default::default(),
             config_path: None,

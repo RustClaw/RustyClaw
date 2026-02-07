@@ -1,6 +1,6 @@
 use crate::config::workspace::Workspace;
 use crate::config::Config;
-use crate::core::{ApprovalManager, MessageResponse, PairingManager, SessionManager};
+use crate::core::{ApprovalManager, MessageResponse, SessionManager};
 use crate::llm::Client as LlmClient;
 use crate::storage::Storage;
 use crate::tools::ToolPolicyEngine;
@@ -14,7 +14,6 @@ pub struct Router<S: Storage> {
     #[allow(dead_code)]
     config: Arc<RwLock<Config>>,
     session_manager: SessionManager<S>,
-    pub pairing_manager: PairingManager<S>,
     approval_manager: Arc<ApprovalManager>,
     policy_engine: Arc<ToolPolicyEngine>,
 }
@@ -49,12 +48,10 @@ impl<S: Storage + 'static> Router<S> {
             workspace,
             approval_manager.clone(),
         );
-        let pairing_manager = PairingManager::new(storage);
 
         Self {
             config,
             session_manager,
-            pairing_manager,
             approval_manager,
             policy_engine,
         }
@@ -66,6 +63,10 @@ impl<S: Storage + 'static> Router<S> {
 
     pub fn workspace(&self) -> &crate::config::workspace::Workspace {
         self.session_manager.workspace()
+    }
+
+    pub fn get_storage(&self) -> &S {
+        self.session_manager.storage()
     }
 
     /// Get the approval manager (for handling tool approval requests)

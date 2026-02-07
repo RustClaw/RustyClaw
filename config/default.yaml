@@ -47,3 +47,7 @@ api:
   port: 18789
   tokens:
   - "rustyclaw-test-token-2024"
+
+admin:
+  username: "admin"
+  password: "01230010"  # CHANGE THIS! Can be plaintext or pre-hashed Argon2id hash

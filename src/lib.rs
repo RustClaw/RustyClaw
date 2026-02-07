@@ -166,9 +166,9 @@ pub async fn run(config: Config) -> Result<()> {
     let router = Router::new(shared_config, storage.clone(), llm_client).await;
     tracing::info!("Router initialized");
 
-    // Check if initial setup is needed
-    if let Err(e) = router.pairing_manager.check_and_start_setup().await {
-        tracing::error!("Failed to check setup state: {}", e);
+    // Bootstrap admin account from config if no users exist
+    if let Err(e) = core::bootstrap::bootstrap_admin(&storage, &config).await {
+        tracing::error!("Failed to bootstrap admin account: {}", e);
     }
 
     // Start channel adapters

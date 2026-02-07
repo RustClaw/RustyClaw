@@ -110,6 +110,10 @@ impl<S: Storage + 'static> SessionManager<S> {
         &self.workspace
     }
 
+    pub fn storage(&self) -> &S {
+        &self.storage
+    }
+
     /// Resolve workspace based on agent ID
     async fn resolve_workspace(
         &self,

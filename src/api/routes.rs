@@ -38,20 +38,6 @@ pub struct CreateSessionRequest {
     pub scope: Option<String>,
 }
 
-/// Setup request
-#[derive(Deserialize)]
-pub struct SetupRequest {
-    pub code: String,
-    pub username: String,
-}
-
-/// Setup response
-#[derive(serde::Serialize)]
-pub struct SetupResponse {
-    pub user: User,
-    pub token: String,
-}
-
 /// Invite request
 #[derive(Deserialize)]
 pub struct InviteRequest {}
@@ -68,6 +54,7 @@ pub struct InviteResponse {
 #[derive(Deserialize)]
 pub struct JoinRequest {
     pub code: String,
+    pub password: String,
     pub label: String,
 }
 
@@ -78,23 +65,36 @@ pub struct JoinResponse {
     pub token: String,
 }
 
-// ===== Setup Endpoints =====
-
-/// POST /api/setup - Claim admin account with OTP
-pub async fn setup_admin<S: Storage + 'static>(
-    State(router): State<Arc<Router<S>>>,
-    Json(req): Json<SetupRequest>,
-) -> Result<Json<ApiResponse<SetupResponse>>, ApiError> {
-    let (user, token) = router
-        .pairing_manager
-        .claim_admin(&req.code, &req.username)
-        .await
-        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-
-    let response = SetupResponse { user, token };
-
-    Ok(Json(ApiResponse::success(response)))
+/// Change password request
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub old_password: String,
+    pub new_password: String,
 }
+
+/// Change password response
+#[derive(serde::Serialize)]
+pub struct ChangePasswordResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// Token info response
+#[derive(serde::Serialize)]
+pub struct TokenInfo {
+    pub provider_id: String,
+    pub label: Option<String>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub last_used_at: Option<chrono::DateTime<Utc>>,
+}
+
+/// List tokens response
+#[derive(serde::Serialize)]
+pub struct ListTokensResponse {
+    pub tokens: Vec<TokenInfo>,
+}
+
+// ===== Device Linking Endpoints =====
 
 /// POST /api/auth/invite - Generate a device linking code
 pub async fn create_invite<S: Storage + 'static>(
@@ -102,9 +102,12 @@ pub async fn create_invite<S: Storage + 'static>(
     Extension(user_id): Extension<String>,
     Json(_req): Json<InviteRequest>,
 ) -> Result<Json<ApiResponse<InviteResponse>>, ApiError> {
-    let code = router
-        .pairing_manager
-        .create_invite(&user_id)
+    let code = crate::core::utils::generate_code(8);
+
+    // Store in database
+    router
+        .get_storage()
+        .create_pending_link(&code, &user_id, "device_link")
         .await
         .map_err(|e| ApiError::InternalError(e.to_string()))?;
 
@@ -117,18 +120,181 @@ pub async fn create_invite<S: Storage + 'static>(
     Ok(Json(ApiResponse::success(response)))
 }
 
-/// POST /api/auth/join - Redeem an invite code
+/// POST /api/auth/join - Redeem an invite code with password verification
 pub async fn join_invite<S: Storage + 'static>(
     State(router): State<Arc<Router<S>>>,
     Json(req): Json<JoinRequest>,
 ) -> Result<Json<ApiResponse<JoinResponse>>, ApiError> {
-    let (user, token) = router
-        .pairing_manager
-        .redeem_invite(&req.code, &req.label)
+    // Validate code
+    let link_data = router
+        .get_storage()
+        .get_pending_link(&req.code)
         .await
-        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+        .map_err(|e| ApiError::InternalError(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired invite code".to_string()))?;
+
+    let (user_id, provider) = link_data;
+    if provider != "device_link" {
+        return Err(ApiError::BadRequest("Invalid invite type".to_string()));
+    }
+
+    // Get user and verify password
+    let user = router
+        .get_storage()
+        .get_user(&user_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("User not found".to_string()))?;
+
+    // Verify password hash
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| ApiError::BadRequest("User has no password set".to_string()))?;
+
+    let password_valid = crate::core::password::verify_password(&req.password, password_hash)
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    if !password_valid {
+        return Err(ApiError::BadRequest("Invalid password".to_string()));
+    }
+
+    // Generate new API token
+    let token = format!("sk-rustyclaw-{}", uuid::Uuid::new_v4());
+    let identity = crate::storage::Identity {
+        provider: "api_token".to_string(),
+        provider_id: token.clone(),
+        user_id: user_id.clone(),
+        label: Some(req.label),
+        created_at: Utc::now(),
+        last_used_at: None,
+    };
+
+    router
+        .get_storage()
+        .create_identity(identity)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    // Delete used code
+    router
+        .get_storage()
+        .delete_pending_link(&req.code)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(JoinResponse { user, token })))
+}
+
+// ===== Password & Token Management Endpoints =====
+
+/// POST /api/auth/change-password - Change user password
+pub async fn change_password<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Extension(user_id): Extension<String>,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<ApiResponse<ChangePasswordResponse>>, ApiError> {
+    // Validate new password
+    if req.new_password.len() < 8 {
+        return Err(ApiError::BadRequest(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    // Get user
+    let user = router
+        .get_storage()
+        .get_user(&user_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("User not found".to_string()))?;
+
+    // Verify old password
+    let password_hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| ApiError::BadRequest("User has no password set".to_string()))?;
+
+    let old_password_valid =
+        crate::core::password::verify_password(&req.old_password, password_hash)
+            .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    if !old_password_valid {
+        return Err(ApiError::BadRequest("Invalid password".to_string()));
+    }
+
+    // Hash new password
+    let new_hash = crate::core::password::hash_password(&req.new_password)
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    // Update password
+    router
+        .get_storage()
+        .update_user_password(&user_id, new_hash)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    let response = ChangePasswordResponse {
+        success: true,
+        message: "Password changed successfully".to_string(),
+    };
+
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// GET /api/auth/tokens - List user's API tokens
+pub async fn list_tokens<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Extension(user_id): Extension<String>,
+) -> Result<Json<ApiResponse<ListTokensResponse>>, ApiError> {
+    let identities = router
+        .get_storage()
+        .list_identities(&user_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    let tokens = identities
+        .into_iter()
+        .filter(|id| id.provider == "api_token")
+        .map(|id| TokenInfo {
+            provider_id: id.provider_id,
+            label: id.label,
+            created_at: id.created_at,
+            last_used_at: id.last_used_at,
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(ListTokensResponse { tokens })))
+}
+
+/// DELETE /api/auth/tokens/:token_id - Revoke an API token
+pub async fn revoke_token<S: Storage + 'static>(
+    State(router): State<Arc<Router<S>>>,
+    Extension(user_id): Extension<String>,
+    Path(token_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    // Verify the token belongs to the user
+    let identity = router
+        .get_storage()
+        .get_identity("api_token", &token_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("Token not found".to_string()))?;
+
+    if identity.user_id != user_id {
+        return Err(ApiError::BadRequest(
+            "Cannot revoke another user's token".to_string(),
+        ));
+    }
+
+    // Delete the token
+    router
+        .get_storage()
+        .delete_identity("api_token", &token_id)
+        .await
+        .map_err(|e| ApiError::InternalError(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ===== Session Endpoints =====

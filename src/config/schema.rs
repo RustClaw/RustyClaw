@@ -26,6 +26,23 @@ impl Default for ApiConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminConfig {
+    #[serde(default = "default_admin_username")]
+    pub username: String,
+    #[serde(default = "default_admin_password")]
+    pub password: String,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            username: default_admin_username(),
+            password: default_admin_password(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
@@ -46,6 +63,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub api: ApiConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
     #[serde(default)]
@@ -508,4 +527,12 @@ fn default_user_tools_dir() -> String {
 
 fn default_tool_creation_enabled() -> bool {
     true
+}
+
+fn default_admin_username() -> String {
+    "admin".to_string()
+}
+
+fn default_admin_password() -> String {
+    "changeme".to_string()
 }

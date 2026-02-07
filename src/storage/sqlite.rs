@@ -170,7 +170,7 @@ impl Storage for SqliteStorage {
     // Identity implementation
     async fn get_user(&self, id: &str) -> Result<Option<User>> {
         let row = sqlx::query(
-            "SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?",
+            "SELECT id, username, role, created_at, updated_at, password_hash FROM users WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -182,12 +182,13 @@ impl Storage for SqliteStorage {
             role: r.get("role"),
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
+            password_hash: r.get("password_hash"),
         }))
     }
 
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let row = sqlx::query(
-            "SELECT id, username, role, created_at, updated_at FROM users WHERE username = ?",
+            "SELECT id, username, role, created_at, updated_at, password_hash FROM users WHERE username = ?",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -199,18 +200,20 @@ impl Storage for SqliteStorage {
             role: r.get("role"),
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
+            password_hash: r.get("password_hash"),
         }))
     }
 
     async fn create_user(&self, user: User) -> Result<()> {
         sqlx::query(
-            "INSERT INTO users (id, username, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (id, username, role, created_at, updated_at, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(user.id)
         .bind(user.username)
         .bind(user.role)
         .bind(user.created_at)
         .bind(user.updated_at)
+        .bind(user.password_hash)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -307,6 +310,25 @@ impl Storage for SqliteStorage {
     async fn delete_pending_link(&self, code: &str) -> Result<()> {
         sqlx::query("DELETE FROM pending_links WHERE code = ?")
             .bind(code)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn update_user_password(&self, user_id: &str, password_hash: String) -> Result<()> {
+        sqlx::query("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?")
+            .bind(password_hash)
+            .bind(chrono::Utc::now())
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_identity(&self, provider: &str, provider_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM identities WHERE provider = ? AND provider_id = ?")
+            .bind(provider)
+            .bind(provider_id)
             .execute(&self.pool)
             .await?;
         Ok(())

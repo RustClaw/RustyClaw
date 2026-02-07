@@ -35,6 +35,8 @@ pub struct User {
     pub role: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,4 +79,10 @@ pub trait Storage: Send + Sync + Clone {
     async fn create_pending_link(&self, code: &str, user_id: &str, provider: &str) -> Result<()>;
     async fn get_pending_link(&self, code: &str) -> Result<Option<(String, String)>>; // returns (user_id, provider)
     async fn delete_pending_link(&self, code: &str) -> Result<()>;
+
+    // Password management
+    async fn update_user_password(&self, user_id: &str, password_hash: String) -> Result<()>;
+
+    // Identity management
+    async fn delete_identity(&self, provider: &str, provider_id: &str) -> Result<()>;
 }

@@ -71,10 +71,6 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
         let public_routes = AxumRouter::new()
             .route("/health", get(health_handler))
             .route(
-                &format!("{}/setup", self.api_path),
-                post(routes::setup_admin),
-            )
-            .route(
                 &format!("{}/auth/join", self.api_path),
                 post(routes::join_invite),
             )
@@ -94,6 +90,18 @@ impl<S: Storage + 'static> WebApiAdapter<S> {
             .route(
                 &format!("{}/auth/invite", self.api_path),
                 post(routes::create_invite),
+            )
+            .route(
+                &format!("{}/auth/change-password", self.api_path),
+                post(routes::change_password),
+            )
+            .route(
+                &format!("{}/auth/tokens", self.api_path),
+                get(routes::list_tokens),
+            )
+            .route(
+                &format!("{}/auth/tokens/:token_id", self.api_path),
+                delete(routes::revoke_token),
             )
             // Session endpoints
             .route(

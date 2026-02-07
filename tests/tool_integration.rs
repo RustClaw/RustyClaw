@@ -44,6 +44,7 @@ async fn test_available_tools_include_creator_and_web() {
         sandbox: Default::default(),
         tools: Default::default(),
         api: Default::default(),
+        admin: Default::default(),
         workspace: Default::default(),
         agents: Default::default(),
         config_path: None,

@@ -46,6 +46,7 @@ async fn test_patch_config() {
         sandbox: Default::default(),
         tools: Default::default(),
         api: Default::default(),
+        admin: Default::default(),
         workspace: Default::default(),
         agents: Default::default(),
         config_path: Some(test_config_path.clone()),
